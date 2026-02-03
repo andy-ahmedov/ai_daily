@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: aidigest-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: aidigest
+      POSTGRES_PASSWORD: aidigest
+      POSTGRES_DB: aidigest
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aidigest -d aidigest"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

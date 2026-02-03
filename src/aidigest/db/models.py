@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+import sqlalchemy as sa
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -15,7 +16,6 @@ from sqlalchemy import (
     SmallInteger,
     Text,
     UniqueConstraint,
-    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -43,9 +43,9 @@ class Channel(Base):
     tg_peer_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
     username: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str] = mapped_column(Text, nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default=sa.text("true"), nullable=False)
     added_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=text("now()"), nullable=False
+        DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
     )
     last_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -67,7 +67,7 @@ class Post(Base):
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
-    has_media: Mapped[bool] = mapped_column(Boolean, server_default=text("false"), nullable=False)
+    has_media: Mapped[bool] = mapped_column(Boolean, server_default=sa.text("false"), nullable=False)
     views: Mapped[int | None] = mapped_column(Integer, nullable=True)
     forwards: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reactions: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
@@ -76,7 +76,7 @@ class Post(Base):
     lang: Mapped[str | None] = mapped_column(Text, nullable=True)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=text("now()"), nullable=False
+        DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
     )
 
 
@@ -89,11 +89,13 @@ class PostSummary(Base):
     key_point: Mapped[str] = mapped_column(Text, nullable=False)
     why_it_matters: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), server_default=text("'{}'"), nullable=False
+        ARRAY(Text), server_default=sa.text("'{}'"), nullable=False
     )
-    importance: Mapped[int] = mapped_column(SmallInteger, server_default=text("3"), nullable=False)
+    importance: Mapped[int] = mapped_column(
+        SmallInteger, server_default=sa.text("3"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=text("now()"), nullable=False
+        DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
     )
 
 
@@ -106,9 +108,9 @@ class Window(Base):
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    status: Mapped[str] = mapped_column(Text, server_default=text("'new'"), nullable=False)
+    status: Mapped[str] = mapped_column(Text, server_default=sa.text("'new'"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=text("now()"), nullable=False
+        DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
     )
 
 
@@ -124,7 +126,7 @@ class DedupCluster(Base):
         BigInteger, ForeignKey("posts.id"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=text("now()"), nullable=False
+        DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
     )
 
 
@@ -149,7 +151,7 @@ class Digest(Base):
     )
     channel_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     message_ids: Mapped[list[int]] = mapped_column(
-        ARRAY(Integer), server_default=text("'{}'"), nullable=False
+        ARRAY(Integer), server_default=sa.text("'{}'"), nullable=False
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     stats: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

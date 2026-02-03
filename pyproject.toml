@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aidigest"
+version = "0.1.0"
+description = "Telegram digest bootstrap"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Your Name" }]
+dependencies = [
+  "pydantic-settings",
+  "python-dotenv",
+  "rich",
+  "loguru",
+  "click",
+  "sqlalchemy",
+  "alembic",
+  "psycopg[binary]",
+  "httpx",
+  "apscheduler",
+  "tenacity",
+  "telethon",
+  "aiogram",
+  "openai",
+]
+
+[project.scripts]
+aidigest = "aidigest.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aidigest"]
