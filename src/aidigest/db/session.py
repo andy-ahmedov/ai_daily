@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from aidigest.db.engine import get_engine
 
 
-SessionFactory = sessionmaker(bind=get_engine())
+SessionFactory = sessionmaker(bind=get_engine(), expire_on_commit=False)
 
 
 @contextmanager

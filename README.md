@@ -47,3 +47,21 @@ alembic revision --autogenerate -m "describe change"
 ```bash
 aidigest doctor
 ```
+
+## Telethon login
+
+1) Заполнить `TG_API_ID` и `TG_API_HASH` в `.env`.
+2) Запустить:
+
+```bash
+aidigest tg:whoami
+```
+
+3) Ввести код подтверждения из Telegram. После этого сессия сохранится в `data/telethon.session` (или в путь из `TG_SESSION_PATH`).
+
+Примеры:
+
+```bash
+aidigest tg:add @somechannel
+aidigest tg:list
+```

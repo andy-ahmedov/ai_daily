@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from urllib.parse import urlparse
 
 import click
@@ -11,7 +12,9 @@ from sqlalchemy import inspect, text
 from aidigest import __version__
 from aidigest.config import get_settings
 from aidigest.db.engine import get_engine
+from aidigest.db.repo_channels import list_channels, upsert_channel
 from aidigest.logging import configure_logging
+from aidigest.telegram.user_client import UserTelegramClient
 
 
 console = Console()
@@ -24,6 +27,28 @@ def _redact_database_url(url: str) -> str:
 
     netloc = parsed.netloc.replace(parsed.password, "***")
     return parsed._replace(netloc=netloc).geturl()
+
+
+def _run_async(coro):
+    try:
+        return asyncio.run(coro)
+    except RuntimeError as exc:
+        if "asyncio.run()" in str(exc):
+            loop = asyncio.get_event_loop()
+            return loop.run_until_complete(coro)
+        raise
+
+
+def _ensure_telegram_settings() -> UserTelegramClient:
+    settings = get_settings()
+    if not settings.tg_api_id or not settings.tg_api_hash:
+        console.print("Missing TG_API_ID/TG_API_HASH. Fill them in .env.")
+        raise SystemExit(1)
+    return UserTelegramClient(
+        api_id=settings.tg_api_id,
+        api_hash=settings.tg_api_hash,
+        session_path=settings.tg_session_path,
+    )
 
 
 @click.group()
@@ -87,3 +112,99 @@ def doctor() -> None:
         schema_ok = False
 
     console.print("DB schema: OK" if schema_ok else "DB schema: not migrated")
+
+
+@main.command(name="tg:whoami")
+def tg_whoami() -> None:
+    """Authorize Telethon and print current user."""
+
+    async def _run() -> None:
+        client = _ensure_telegram_settings()
+        await client.connect()
+        try:
+            who = await client.whoami()
+            console.print(who)
+        finally:
+            await client.disconnect()
+
+    try:
+        _run_async(_run())
+    except Exception as exc:
+        console.print(f"Error: {exc}")
+        raise SystemExit(1) from exc
+
+
+@main.command(name="tg:resolve")
+@click.argument("ref")
+def tg_resolve(ref: str) -> None:
+    """Resolve channel reference into peer info."""
+
+    async def _run() -> None:
+        client = _ensure_telegram_settings()
+        await client.connect()
+        try:
+            info = await client.get_channel_info(ref)
+            console.print(f"{info['tg_peer_id']} {info['title']} {info['username'] or ''}")
+        finally:
+            await client.disconnect()
+
+    try:
+        _run_async(_run())
+    except Exception as exc:
+        console.print(f"Error: {exc}")
+        raise SystemExit(1) from exc
+
+
+@main.command(name="tg:add")
+@click.argument("ref")
+def tg_add(ref: str) -> None:
+    """Join channel if needed and upsert it into DB."""
+
+    async def _run() -> None:
+        client = _ensure_telegram_settings()
+        await client.connect()
+        try:
+            entity = await client.ensure_join(ref)
+            info = client._entity_info(entity)
+        finally:
+            await client.disconnect()
+
+        channel = upsert_channel(
+            tg_peer_id=info["tg_peer_id"],
+            username=info["username"],
+            title=info["title"],
+            is_active=True,
+        )
+        console.print(f"Added/Updated: {channel.title} ({channel.tg_peer_id})")
+
+    try:
+        _run_async(_run())
+    except Exception as exc:
+        console.print(f"Error: {exc}")
+        raise SystemExit(1) from exc
+
+
+@main.command(name="tg:list")
+@click.option("--all", "show_all", is_flag=True, help="Show inactive channels too.")
+def tg_list(show_all: bool) -> None:
+    """List channels from database."""
+    channels = list_channels(active_only=not show_all)
+    if not channels:
+        console.print("No channels found.")
+        return
+
+    table = Table(title="Channels")
+    table.add_column("tg_peer_id", style="bold")
+    table.add_column("title")
+    table.add_column("username")
+    table.add_column("active")
+
+    for channel in channels:
+        table.add_row(
+            str(channel.tg_peer_id),
+            channel.title,
+            channel.username or "",
+            "yes" if channel.is_active else "no",
+        )
+
+    console.print(table)
