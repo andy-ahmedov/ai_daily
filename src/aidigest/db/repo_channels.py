@@ -46,3 +46,29 @@ def list_channels(active_only: bool = False) -> List[Channel]:
             stmt = stmt.where(Channel.is_active.is_(True))
         stmt = stmt.order_by(Channel.id.asc())
         return list(session.execute(stmt).scalars())
+
+
+def get_channel_by_peer_id(tg_peer_id: int) -> Channel | None:
+    with get_session() as session:
+        return session.execute(
+            select(Channel).where(Channel.tg_peer_id == tg_peer_id)
+        ).scalar_one_or_none()
+
+
+def get_channel_by_username(username: str) -> Channel | None:
+    with get_session() as session:
+        return session.execute(
+            select(Channel).where(Channel.username == username)
+        ).scalar_one_or_none()
+
+
+def set_channel_active(channel: Channel, is_active: bool) -> Channel:
+    with get_session() as session:
+        existing = session.execute(
+            select(Channel).where(Channel.id == channel.id)
+        ).scalar_one_or_none()
+        if not existing:
+            raise RuntimeError("channel not found")
+        existing.is_active = is_active
+        session.flush()
+        return existing

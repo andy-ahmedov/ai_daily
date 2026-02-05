@@ -14,6 +14,7 @@ from aidigest.config import get_settings
 from aidigest.db.engine import get_engine
 from aidigest.db.repo_channels import list_channels, upsert_channel
 from aidigest.logging import configure_logging
+from aidigest.bot_commands.app import run_bot_sync
 from aidigest.telegram.user_client import UserTelegramClient
 
 
@@ -208,3 +209,13 @@ def tg_list(show_all: bool) -> None:
         )
 
     console.print(table)
+
+
+@main.command(name="bot:run")
+def bot_run() -> None:
+    """Run Telegram bot (polling)."""
+    try:
+        run_bot_sync()
+    except Exception as exc:
+        console.print(f"Error: {exc}")
+        raise SystemExit(1) from exc

@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     tg_session_path: str = Field(default="./data/telethon.session", alias="TG_SESSION_PATH")
     bot_token: str | None = Field(default=None, alias="BOT_TOKEN")
     digest_channel_id: str | None = Field(default=None, alias="DIGEST_CHANNEL_ID")
+    admin_tg_user_id: int | None = Field(default=None, alias="ADMIN_TG_USER_ID")
+    allowed_user_ids: list[int] = Field(default_factory=list, alias="ALLOWED_USER_IDS")
 
     timezone: str = Field(default="Europe/Riga", alias="TIMEZONE")
     window_start_hour: int = Field(default=13, alias="WINDOW_START_HOUR")
@@ -52,6 +54,20 @@ class Settings(BaseSettings):
         if value <= 0:
             raise ValueError("embed_dim must be greater than 0")
         return value
+
+    @field_validator("allowed_user_ids", mode="before")
+    @classmethod
+    def parse_allowed_user_ids(cls, value: object) -> list[int]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [int(item) for item in value]
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return []
+            return [int(item.strip()) for item in stripped.split(",") if item.strip()]
+        return []
 
     @field_validator("database_url")
     @classmethod

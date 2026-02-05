@@ -65,3 +65,23 @@ aidigest tg:whoami
 aidigest tg:add @somechannel
 aidigest tg:list
 ```
+
+## Telegram bot
+
+1) Заполнить `BOT_TOKEN` и `ADMIN_TG_USER_ID` (или `ALLOWED_USER_IDS`) в `.env`.
+2) Запустить:
+
+```bash
+aidigest bot:run
+```
+
+Примеры команд в личке:
+
+```text
+/start
+/add @telegram
+/list
+/remove @telegram
+/list_all
+/status
+```
