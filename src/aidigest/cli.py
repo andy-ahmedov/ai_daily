@@ -13,6 +13,7 @@ from sqlalchemy import inspect, text
 
 from aidigest import __version__
 from aidigest.config import get_settings
+from aidigest.db.repo_dedup import top_hash_groups_in_window
 from aidigest.db.engine import get_engine
 from aidigest.db.repo_channels import list_channels, upsert_channel
 from aidigest.ingest import ingest_posts_for_date
@@ -304,3 +305,32 @@ def ingest(target_date: date | None, dry_run: bool) -> None:
     except Exception as exc:
         console.print(f"Error: {exc}")
         raise SystemExit(1) from exc
+
+
+@main.command(name="dedup:report")
+@click.option("--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD.")
+def dedup_report(target_date: date | None) -> None:
+    """Show top exact-duplicate groups by content_hash for ingest window."""
+    settings = get_settings()
+    effective_date = target_date or datetime.now(ZoneInfo(settings.timezone)).date()
+    start_at, end_at = compute_window(
+        target_date=effective_date,
+        tz=settings.timezone,
+        start_hour=settings.window_start_hour,
+    )
+    console.print(f"Window: {start_at.isoformat()} -> {end_at.isoformat()} ({settings.timezone})")
+
+    groups = top_hash_groups_in_window(start_at=start_at, end_at=end_at, limit=10)
+    if not groups:
+        console.print("No exact duplicates found for this window.")
+        return
+
+    table = Table(title="Exact Dedup Report (top 10)")
+    table.add_column("content_hash", style="bold")
+    table.add_column("duplicates")
+    table.add_column("channels")
+
+    for group in groups:
+        table.add_row(group.content_hash, str(group.duplicates), ", ".join(group.channel_titles))
+
+    console.print(table)

@@ -93,6 +93,24 @@ aidigest ingest --dry-run
 psql "$DATABASE_URL" -c "SELECT count(*) FROM posts;"
 ```
 
+## Exact dedup by content_hash
+
+`content_hash` строится из нормализованного текста поста. Если текст пустой, но есть медиа, хэш строится по маркеру `media-only` + `posted_at` + `permalink`.
+
+Отчет по exact-дублям за ingest-окно:
+
+```bash
+aidigest dedup:report
+```
+
+За конкретную дату окна:
+
+```bash
+aidigest dedup:report --date 2026-02-07
+```
+
+Команда ничего не изменяет в БД и показывает top-10 групп с одинаковым `content_hash`, количеством дублей и каналами, где они встретились.
+
 ## Telegram bot
 
 1) Заполнить `BOT_TOKEN` и `ADMIN_TG_USER_ID` (или `ALLOWED_USER_IDS`) в `.env`.

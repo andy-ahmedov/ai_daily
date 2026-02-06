@@ -111,6 +111,7 @@ async def fetch_posts_in_window(
             "views": message.views,
             "forwards": message.forwards,
         }
+        permalink = _build_permalink(channel_username, int(message.id))
 
         posts.append(
             FetchedPost(
@@ -127,11 +128,11 @@ async def fetch_posts_in_window(
                 forwards=message.forwards,
                 reactions=_serialize_reactions(message.reactions),
                 raw=raw,
-                permalink=_build_permalink(channel_username, int(message.id)),
+                permalink=permalink,
                 content_hash=compute_content_hash(
-                    message.message,
+                    text,
                     has_media=has_media,
-                    message_id=int(message.id),
+                    permalink=permalink,
                     posted_at=posted_at,
                 ),
             )
