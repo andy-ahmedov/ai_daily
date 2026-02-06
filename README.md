@@ -111,6 +111,34 @@ aidigest dedup:report --date 2026-02-07
 
 Команда ничего не изменяет в БД и показывает top-10 групп с одинаковым `content_hash`, количеством дублей и каналами, где они встретились.
 
+## Summarize (Alice AI LLM)
+
+Нужные переменные в `.env`:
+
+- `YANDEX_API_KEY` (API-ключ Yandex AI Studio)
+- `YANDEX_FOLDER_ID` (ID каталога в Yandex Cloud)
+- `YANDEX_MODEL_URI` (например: `gpt://<folder_id>/aliceai-llm`)
+
+Где взять значения:
+
+- API ключ: Yandex Cloud Console -> сервисный аккаунт/AI Studio -> создать API key.
+- Folder ID: карточка каталога в Yandex Cloud Console.
+- Model URI: собрать как `gpt://<folder_id>/aliceai-llm`.
+
+После ingest можно запустить суммаризацию:
+
+```bash
+aidigest ingest && aidigest summarize --limit 50
+```
+
+За конкретную дату окна:
+
+```bash
+aidigest summarize --date 2026-02-07 --limit 50
+```
+
+Команда сначала переиспользует exact-dedup summary по `content_hash`, и только для оставшихся постов вызывает LLM.
+
 ## Telegram bot
 
 1) Заполнить `BOT_TOKEN` и `ADMIN_TG_USER_ID` (или `ALLOWED_USER_IDS`) в `.env`.

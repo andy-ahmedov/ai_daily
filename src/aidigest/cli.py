@@ -19,6 +19,7 @@ from aidigest.db.repo_channels import list_channels, upsert_channel
 from aidigest.ingest import ingest_posts_for_date
 from aidigest.ingest.window import compute_window
 from aidigest.logging import configure_logging
+from aidigest.nlp.summarize import summarize_window
 from aidigest.bot_commands.app import run_bot_sync
 from aidigest.telegram.user_client import UserTelegramClient
 
@@ -102,6 +103,8 @@ def doctor() -> None:
         "RUN_AT_HOUR": settings.run_at_hour,
         "RUN_AT_MINUTE": settings.run_at_minute,
         "DATABASE_URL": _redact_database_url(settings.database_url),
+        "YANDEX_FOLDER_ID": settings.yandex_folder_id,
+        "YANDEX_MODEL_URI": settings.yandex_model_uri,
         "EMBED_DIM": settings.embed_dim,
         "DEDUP_THRESHOLD": settings.dedup_threshold,
     }
@@ -131,6 +134,29 @@ def doctor() -> None:
         schema_ok = False
 
     console.print("DB schema: OK" if schema_ok else "DB schema: not migrated")
+
+    if settings.yandex_api_key and settings.yandex_folder_id and settings.yandex_model_uri:
+        try:
+            from aidigest.nlp.yandex_llm import chat_json, make_client
+
+            client = make_client(settings)
+            response = chat_json(
+                client=client,
+                model_uri=settings.yandex_model_uri,
+                messages=[
+                    {"role": "system", "content": "Respond with JSON only."},
+                    {"role": "user", "content": 'Respond with JSON: {"ok":true}'},
+                ],
+                post_id=0,
+            )
+            if response.get("ok") is True:
+                console.print("Yandex LLM: OK")
+            else:
+                console.print("Yandex LLM: ERROR unexpected response")
+        except Exception as exc:
+            console.print(f"Yandex LLM: ERROR {exc}")
+    else:
+        console.print("Yandex LLM: not configured")
 
 
 @main.command(name="tg:whoami")
@@ -333,4 +359,41 @@ def dedup_report(target_date: date | None) -> None:
     for group in groups:
         table.add_row(group.content_hash, str(group.duplicates), ", ".join(group.channel_titles))
 
+    console.print(table)
+
+
+@main.command(name="summarize")
+@click.option("--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD.")
+@click.option("--limit", default=100, show_default=True, type=int, help="Max posts to process.")
+@click.option("--dry-run", is_flag=True, help="Calculate actions without writing summaries.")
+def summarize(target_date: date | None, limit: int, dry_run: bool) -> None:
+    """Summarize posts with Alice AI LLM and exact-dedup reuse."""
+    if limit <= 0:
+        raise click.BadParameter("--limit must be > 0")
+
+    settings = get_settings()
+    effective_date = target_date or datetime.now(ZoneInfo(settings.timezone)).date()
+    start_at, end_at = compute_window(
+        target_date=effective_date,
+        tz=settings.timezone,
+        start_hour=settings.window_start_hour,
+    )
+    console.print(f"Window: {start_at.isoformat()} -> {end_at.isoformat()} ({settings.timezone})")
+
+    stats = summarize_window(
+        start_at=start_at,
+        end_at=end_at,
+        limit=limit,
+        dry_run=dry_run,
+    )
+
+    mode = "Summarize (dry-run)" if dry_run else "Summarize"
+    table = Table(title=mode)
+    table.add_column("metric", style="bold")
+    table.add_column("value")
+    table.add_row("total candidates", str(stats.total_candidates))
+    table.add_row("skipped_existing", str(stats.skipped_existing))
+    table.add_row("copied_exact_dup", str(stats.copied_exact_dup))
+    table.add_row("summarized", str(stats.summarized))
+    table.add_row("errors", str(stats.errors))
     console.print(table)
