@@ -18,7 +18,7 @@ from telethon.errors import (
 from telethon.tl.functions.channels import JoinChannelRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest
 from telethon.tl.types import Channel, Chat, User
-from telethon.utils import get_peer_id
+from telethon.utils import get_peer_id, resolve_id
 
 
 _INVITE_RE = re.compile(r"(?:^|/)joinchat/(?P<hash>[\w-]+)$", re.IGNORECASE)
@@ -78,10 +78,17 @@ class UserTelegramClient:
         self.session_path = Path(session_path)
         self._client = TelegramClient(str(self.session_path), api_id, api_hash)
 
-    async def connect(self) -> None:
+    @property
+    def client(self) -> TelegramClient:
+        return self._client
+
+    async def connect(self, allow_interactive_login: bool = True) -> None:
         self.session_path.parent.mkdir(parents=True, exist_ok=True)
         await self._client.connect()
         if not await self._client.is_user_authorized():
+            if not allow_interactive_login:
+                await self._client.disconnect()
+                raise RuntimeError("Telethon session is not authorized. Run `aidigest tg:whoami` first.")
             logger.info("Telethon session not authorized. Starting interactive login.")
             await self._client.start()
 
@@ -112,6 +119,15 @@ class UserTelegramClient:
             raise RuntimeError("cannot resolve: username not found") from exc
         except Exception as exc:
             logger.warning("Failed to resolve entity: {} ({})", ref, exc)
+            raise RuntimeError("cannot resolve: failed to resolve entity") from exc
+
+    async def resolve_entity_by_peer_id(self, tg_peer_id: int) -> Any:
+        try:
+            peer_id, peer_type = resolve_id(tg_peer_id)
+            peer = peer_type(peer_id)
+            return await self._client.get_entity(peer)
+        except Exception as exc:
+            logger.warning("Failed to resolve entity by peer id: {} ({})", tg_peer_id, exc)
             raise RuntimeError("cannot resolve: failed to resolve entity") from exc
 
     async def ensure_join(self, entity_or_ref: Any) -> Any:

@@ -66,6 +66,33 @@ aidigest tg:add @somechannel
 aidigest tg:list
 ```
 
+## Ingest posts
+
+1) Добавить каналы (через bot `/add ...` или CLI `aidigest tg:add ...`).
+2) Запустить ingest за окно `вчера 13:00 -> сегодня 13:00` (TIMEZONE из `.env`):
+
+```bash
+aidigest ingest
+```
+
+3) Запустить за конкретную дату:
+
+```bash
+aidigest ingest --date 2026-02-07
+```
+
+4) Прогон без записи в БД:
+
+```bash
+aidigest ingest --dry-run
+```
+
+Проверка в БД:
+
+```bash
+psql "$DATABASE_URL" -c "SELECT count(*) FROM posts;"
+```
+
 ## Telegram bot
 
 1) Заполнить `BOT_TOKEN` и `ADMIN_TG_USER_ID` (или `ALLOWED_USER_IDS`) в `.env`.

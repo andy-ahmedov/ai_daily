@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date, datetime
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 import click
 from dotenv import load_dotenv
@@ -13,6 +15,8 @@ from aidigest import __version__
 from aidigest.config import get_settings
 from aidigest.db.engine import get_engine
 from aidigest.db.repo_channels import list_channels, upsert_channel
+from aidigest.ingest import ingest_posts_for_date
+from aidigest.ingest.window import compute_window
 from aidigest.logging import configure_logging
 from aidigest.bot_commands.app import run_bot_sync
 from aidigest.telegram.user_client import UserTelegramClient
@@ -50,6 +54,19 @@ def _ensure_telegram_settings() -> UserTelegramClient:
         api_hash=settings.tg_api_hash,
         session_path=settings.tg_session_path,
     )
+
+
+def _parse_target_date(
+    ctx: click.Context,  # noqa: ARG001
+    param: click.Parameter,  # noqa: ARG001
+    value: str | None,
+) -> date | None:
+    if value is None:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise click.BadParameter("Expected format YYYY-MM-DD.") from exc
 
 
 @click.group()
@@ -216,6 +233,74 @@ def bot_run() -> None:
     """Run Telegram bot (polling)."""
     try:
         run_bot_sync()
+    except Exception as exc:
+        console.print(f"Error: {exc}")
+        raise SystemExit(1) from exc
+
+
+@main.command(name="ingest")
+@click.option("--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD.")
+@click.option("--dry-run", is_flag=True, help="Fetch posts and print stats without writing to DB.")
+def ingest(target_date: date | None, dry_run: bool) -> None:
+    """Ingest channel posts for daily [13:00, 13:00) window."""
+
+    async def _run() -> None:
+        settings = get_settings()
+        effective_date = target_date or datetime.now(ZoneInfo(settings.timezone)).date()
+        start_at, end_at = compute_window(
+            target_date=effective_date,
+            tz=settings.timezone,
+            start_hour=settings.window_start_hour,
+        )
+
+        console.print(
+            f"Window: {start_at.isoformat()} -> {end_at.isoformat()} ({settings.timezone})"
+        )
+
+        client = _ensure_telegram_settings()
+        await client.connect(allow_interactive_login=False)
+        try:
+            summary = await ingest_posts_for_date(
+                client=client,
+                target_date=effective_date,
+                timezone=settings.timezone,
+                start_hour=settings.window_start_hour,
+                dry_run=dry_run,
+            )
+        finally:
+            await client.disconnect()
+
+        table_title = "Ingest (dry-run)" if dry_run else "Ingest"
+        table = Table(title=table_title)
+        table.add_column("channel_id", style="bold")
+        table.add_column("title")
+        table.add_column("fetched")
+        table.add_column("inserted" if not dry_run else "would_insert")
+        table.add_column("updated" if not dry_run else "would_update")
+        table.add_column("status")
+
+        for channel in summary.per_channel:
+            table.add_row(
+                str(channel.channel_id),
+                channel.title,
+                str(channel.fetched),
+                str(channel.inserted),
+                str(channel.updated),
+                channel.error or "ok",
+            )
+
+        console.print(table)
+        console.print(
+            "Summary: "
+            f"channels={summary.channels_processed}, "
+            f"fetched={summary.posts_fetched}, "
+            f"inserted={summary.posts_inserted}, "
+            f"updated={summary.posts_updated}, "
+            f"duration={summary.duration_seconds:.2f}s"
+        )
+
+    try:
+        _run_async(_run())
     except Exception as exc:
         console.print(f"Error: {exc}")
         raise SystemExit(1) from exc
