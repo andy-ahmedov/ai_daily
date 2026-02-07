@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import re
 import time
 from datetime import date, datetime, timezone
 from urllib.parse import urlparse
@@ -36,6 +37,7 @@ from aidigest.telegram.bot_client import DigestPublisher
 from aidigest.telegram.user_client import UserTelegramClient
 
 console = Console()
+_VECTOR_TYPE_RE = re.compile(r"^vector\((\d+)\)$", re.IGNORECASE)
 
 
 def _redact_database_url(url: str) -> str:
@@ -103,6 +105,15 @@ def _build_telegram_message_link(chat_id: int, message_id: int) -> str | None:
     return f"https://t.me/c/{channel[3:]}/{message_id}"
 
 
+def _parse_vector_dimension(type_name: str | None) -> int | None:
+    if type_name is None:
+        return None
+    match = _VECTOR_TYPE_RE.match(type_name.strip())
+    if not match:
+        return None
+    return int(match.group(1))
+
+
 @click.group()
 def main() -> None:
     """Aidigest CLI."""
@@ -159,14 +170,43 @@ def doctor() -> None:
     console.print("DB: OK")
 
     schema_ok = False
+    db_embed_dim: int | None = None
     try:
         with engine.connect() as conn:
             inspector = inspect(conn)
             schema_ok = inspector.has_table("channels")
+            embedding_type = conn.execute(
+                text(
+                    """
+                    SELECT format_type(a.atttypid, a.atttypmod)
+                    FROM pg_attribute a
+                    JOIN pg_class c ON c.oid = a.attrelid
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE c.relname = 'posts'
+                      AND n.nspname = current_schema()
+                      AND a.attname = 'embedding'
+                      AND a.attnum > 0
+                      AND NOT a.attisdropped
+                    """
+                )
+            ).scalar_one_or_none()
+            db_embed_dim = _parse_vector_dimension(
+                str(embedding_type) if embedding_type is not None else None
+            )
     except Exception:
         schema_ok = False
 
     console.print("DB schema: OK" if schema_ok else "DB schema: not migrated")
+    if db_embed_dim is not None:
+        if db_embed_dim == settings.embed_dim:
+            console.print(f"DB embedding dim: OK ({db_embed_dim})")
+        else:
+            console.print(
+                f"DB embedding dim: MISMATCH env={settings.embed_dim} db={db_embed_dim}"
+            )
+            raise SystemExit(1)
+    else:
+        console.print("DB embedding dim: unknown")
 
     if settings.yandex_api_key and settings.yandex_folder_id and settings.yandex_model_uri:
         try:

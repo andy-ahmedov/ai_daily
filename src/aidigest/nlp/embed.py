@@ -89,6 +89,7 @@ def _embed_with_retry(
     response = client.embeddings.create(
         model=model_uri,
         input=texts,
+        encoding_format="float",
     )
     data = sorted(response.data, key=lambda item: int(getattr(item, "index", 0)))
     vectors: list[list[float]] = []
