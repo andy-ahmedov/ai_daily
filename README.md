@@ -212,6 +212,26 @@ aidigest digest --top 10
 
 Каждый блок уже подготовлен под Telegram HTML и ограничен по длине.
 
+## Publish
+
+Для публикации нужны переменные:
+
+- `BOT_TOKEN`
+- `DIGEST_CHANNEL_ID` (chat_id канала, обычно вида `-100...`)
+
+Публикация:
+
+```bash
+aidigest publish
+```
+
+Повторный запуск для того же окна без `--force` не отправляет повторно:
+
+```bash
+aidigest publish
+# Already published for window ...
+```
+
 ## Telegram bot
 
 1) Заполнить `BOT_TOKEN` и `ADMIN_TG_USER_ID` (или `ALLOWED_USER_IDS`) в `.env`.

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import random
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
@@ -16,6 +16,8 @@ from sqlalchemy import inspect, text
 
 from aidigest import __version__
 from aidigest.config import get_settings
+from aidigest.db.repo_dedup_clusters import get_or_create_window
+from aidigest.db.repo_digests import get_digest_by_window, upsert_digest
 from aidigest.db.repo_digest import get_window_by_range
 from aidigest.db.repo_embeddings import get_posts_missing_embedding, update_post_embedding
 from aidigest.db.repo_dedup import top_hash_groups_in_window
@@ -29,6 +31,7 @@ from aidigest.logging import configure_logging
 from aidigest.nlp.dedup import run_semantic_dedup
 from aidigest.nlp.summarize import summarize_window
 from aidigest.bot_commands.app import run_bot_sync
+from aidigest.telegram.bot_client import DigestPublisher
 from aidigest.telegram.user_client import UserTelegramClient
 
 
@@ -77,6 +80,27 @@ def _parse_target_date(
         return datetime.strptime(value, "%Y-%m-%d").date()
     except ValueError as exc:
         raise click.BadParameter("Expected format YYYY-MM-DD.") from exc
+
+
+def _try_parse_chat_id(value: str | None) -> int | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    try:
+        return int(stripped)
+    except ValueError:
+        return None
+
+
+def _build_telegram_message_link(chat_id: int, message_id: int) -> str | None:
+    if chat_id >= 0:
+        return None
+    channel = str(abs(chat_id))
+    if not channel.startswith("100"):
+        return None
+    return f"https://t.me/c/{channel[3:]}/{message_id}"
 
 
 @click.group()
@@ -484,6 +508,76 @@ def digest(target_date: date | None, top: int, dry_run: bool) -> None:
     for idx, message in enumerate(messages, start=1):
         click.echo(f"----- MESSAGE {idx}/{total} -----")
         click.echo(message)
+
+
+@main.command(name="publish")
+@click.option("--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD.")
+@click.option("--force", is_flag=True, help="Publish again even if this window was published before.")
+def publish(target_date: date | None, force: bool) -> None:
+    """Publish rendered digest to Telegram channel and persist message ids."""
+    settings = get_settings()
+    if not settings.bot_token:
+        raise click.ClickException("BOT_TOKEN must be set for publish.")
+    chat_id = _try_parse_chat_id(settings.digest_channel_id)
+    if chat_id is None:
+        raise click.ClickException("DIGEST_CHANNEL_ID must be a Telegram chat_id (e.g. -100...).")
+
+    effective_date = target_date or datetime.now(ZoneInfo(settings.timezone)).date()
+    start_at, end_at = compute_window(
+        target_date=effective_date,
+        tz=settings.timezone,
+        start_hour=settings.window_start_hour,
+    )
+    window = get_or_create_window(start_at=start_at, end_at=end_at)
+    existing = get_digest_by_window(window.id)
+    if existing is not None and existing.published_at is not None and not force:
+        console.print(
+            "Already published for window "
+            f"{start_at.isoformat()} -> {end_at.isoformat()} (window_id={window.id})."
+        )
+        return
+
+    digest_data = build_digest_data(
+        start_at=start_at,
+        end_at=end_at,
+        window_id=window.id,
+        top_n=10,
+    )
+    messages = render_digest_html(digest_data)
+    if not messages:
+        raise click.ClickException("Digest rendering produced no messages.")
+
+    with DigestPublisher(settings.bot_token) as publisher:
+        message_ids = publisher.send_html_messages(chat_id=chat_id, messages=messages)
+
+    stats = {
+        "messages": len(messages),
+        "top_clusters": len(digest_data.top_clusters),
+        "channels": len(digest_data.per_channel),
+        "posts": sum(channel.posts_count for channel in digest_data.per_channel),
+    }
+    content = "\n\n----- MESSAGE BREAK -----\n\n".join(messages)
+    published_at = datetime.now(timezone.utc)
+
+    upsert_digest(
+        window_id=window.id,
+        channel_id=chat_id,
+        message_ids=message_ids,
+        content=content,
+        stats=stats,
+        published_at=published_at,
+    )
+
+    console.print(
+        f"Published {len(message_ids)} messages to {chat_id} "
+        f"for window {start_at.isoformat()} -> {end_at.isoformat()}."
+    )
+    for idx, message_id in enumerate(message_ids, start=1):
+        link = _build_telegram_message_link(chat_id, message_id)
+        if link:
+            console.print(f"{idx}. message_id={message_id} link={link}")
+        else:
+            console.print(f"{idx}. message_id={message_id}")
 
 
 @main.command(name="summarize")
