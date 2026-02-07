@@ -41,6 +41,8 @@ class PipelineStats:
     dedup: DedupStats | None = None
     messages_sent: int = 0
     total_duration_seconds: float = 0.0
+    failed: bool = False
+    error: str | None = None
 
 
 def _run_async(coro: Any) -> Any:
@@ -349,4 +351,6 @@ def run_daily_pipeline(target_date: date | None = None) -> PipelineStats:
         else:
             logger.exception("pipeline failed before window initialization error={}", exc)
         stats.total_duration_seconds = _stage_duration(pipeline_started_at)
+        stats.failed = True
+        stats.error = str(exc)
         return stats

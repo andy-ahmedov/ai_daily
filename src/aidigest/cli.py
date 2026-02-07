@@ -647,13 +647,18 @@ def run_once(target_date: date | None) -> None:
     table = Table(title="Pipeline Run Once")
     table.add_column("metric", style="bold")
     table.add_column("value")
+    table.add_row("status", "failed" if stats.failed else "ok")
     table.add_row("duration", f"{stats.total_duration_seconds:.2f}s")
     table.add_row("messages_sent", str(stats.messages_sent))
     table.add_row("ingest fetched", str(stats.ingest.posts_fetched if stats.ingest else 0))
     table.add_row("summarized", str(stats.summarize.summarized if stats.summarize else 0))
     table.add_row("embedded", str(stats.embed.embedded if stats.embed else 0))
     table.add_row("clusters", str(stats.dedup.clusters_created if stats.dedup else 0))
+    if stats.error:
+        table.add_row("error", stats.error)
     console.print(table)
+    if stats.failed:
+        raise click.ClickException("Pipeline failed. See logs above.")
 
 
 @main.command(name="scheduler:run")
