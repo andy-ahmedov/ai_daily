@@ -23,6 +23,7 @@ from aidigest.db.repo_channels import list_channels, upsert_channel
 from aidigest.ingest import ingest_posts_for_date
 from aidigest.ingest.window import compute_window
 from aidigest.logging import configure_logging
+from aidigest.nlp.dedup import run_semantic_dedup
 from aidigest.nlp.summarize import summarize_window
 from aidigest.bot_commands.app import run_bot_sync
 from aidigest.telegram.user_client import UserTelegramClient
@@ -380,6 +381,66 @@ def dedup_report(target_date: date | None) -> None:
         table.add_row(group.content_hash, str(group.duplicates), ", ".join(group.channel_titles))
 
     console.print(table)
+
+
+@main.command(name="dedup")
+@click.option("--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD.")
+@click.option("--threshold", type=float, help="Cosine similarity threshold (0..1).")
+@click.option("--top-k", default=80, show_default=True, type=int, help="Top similar posts per cluster center.")
+@click.option("--dry-run", is_flag=True, help="Calculate clusters without writing to DB.")
+def dedup(target_date: date | None, threshold: float | None, top_k: int, dry_run: bool) -> None:
+    """Cluster semantically similar posts in ingest window."""
+    if top_k <= 0:
+        raise click.BadParameter("--top-k must be > 0")
+
+    settings = get_settings()
+    effective_date = target_date or datetime.now(ZoneInfo(settings.timezone)).date()
+    start_at, end_at = compute_window(
+        target_date=effective_date,
+        tz=settings.timezone,
+        start_hour=settings.window_start_hour,
+    )
+    threshold_value = settings.dedup_threshold if threshold is None else threshold
+    if not 0 <= threshold_value <= 1:
+        raise click.BadParameter("--threshold must be in range 0..1")
+
+    console.print(f"Window: {start_at.isoformat()} -> {end_at.isoformat()} ({settings.timezone})")
+    console.print(
+        f"Semantic dedup params: threshold={threshold_value:.4f}, top_k={top_k}, dry_run={dry_run}"
+    )
+
+    stats = run_semantic_dedup(
+        start_at=start_at,
+        end_at=end_at,
+        threshold=threshold_value,
+        top_k=top_k,
+        dry_run=dry_run,
+    )
+
+    table_title = "Semantic Dedup (dry-run)" if dry_run else "Semantic Dedup"
+    table = Table(title=table_title)
+    table.add_column("metric", style="bold")
+    table.add_column("value")
+    table.add_row("clusters_created", str(stats.clusters_created))
+    table.add_row("posts_assigned", str(stats.posts_assigned))
+    table.add_row("posts_skipped_no_embedding", str(stats.posts_skipped_no_embedding))
+    table.add_row("largest_cluster_size", str(stats.largest_cluster_size))
+    table.add_row("avg_cluster_size", f"{stats.average_cluster_size:.2f}")
+    table.add_row("duration", f"{stats.duration_seconds:.2f}s")
+    console.print(table)
+
+    if stats.top_clusters:
+        top_table = Table(title="Top Clusters by Size")
+        top_table.add_column("#", style="bold")
+        top_table.add_column("representative_post_id")
+        top_table.add_column("size")
+        for idx, cluster in enumerate(stats.top_clusters, start=1):
+            top_table.add_row(
+                str(idx),
+                str(cluster.representative_post_id),
+                str(len(cluster.members)),
+            )
+        console.print(top_table)
 
 
 @main.command(name="summarize")

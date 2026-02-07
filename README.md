@@ -168,6 +168,29 @@ psql "$DATABASE_URL" -c "SELECT count(*) FROM posts WHERE embedding IS NOT NULL;
 
 Повторный запуск не переэмбеддит посты, у которых `embedding` уже заполнен.
 
+## Semantic dedup (pgvector)
+
+Рекомендуемый порядок запуска:
+
+```bash
+aidigest ingest
+aidigest summarize --limit 100   # опционально
+aidigest embed --limit 200
+aidigest dedup
+```
+
+Команда `aidigest dedup` строит кластеры семантически похожих постов за окно `13:00 -> 13:00`
+и заполняет `dedup_clusters`/`dedup_cluster_posts`.
+
+Примеры:
+
+```bash
+aidigest dedup --threshold 0.88 --top-k 80
+aidigest dedup --date 2026-02-07 --dry-run
+```
+
+Повторный запуск за то же окно пересчитывает результат: старые кластеры удаляются и создаются заново.
+
 ## Telegram bot
 
 1) Заполнить `BOT_TOKEN` и `ADMIN_TG_USER_ID` (или `ALLOWED_USER_IDS`) в `.env`.
