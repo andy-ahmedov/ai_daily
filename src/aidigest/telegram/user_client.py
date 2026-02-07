@@ -74,7 +74,12 @@ class UserTelegramClient:
     def __init__(self, api_id: int, api_hash: str, session_path: str) -> None:
         self.api_id = api_id
         self.api_hash = api_hash
-        self.session_path = Path(session_path)
+        raw_path = Path(session_path).expanduser()
+        self.session_path = (
+            raw_path.resolve(strict=False)
+            if raw_path.is_absolute()
+            else (Path.cwd() / raw_path).resolve(strict=False)
+        )
         self._client = TelegramClient(str(self.session_path), api_id, api_hash)
 
     @property
@@ -84,14 +89,16 @@ class UserTelegramClient:
     async def connect(self, allow_interactive_login: bool = True) -> None:
         self.session_path.parent.mkdir(parents=True, exist_ok=True)
         await self._client.connect()
-        if not await self._client.is_user_authorized():
-            if not allow_interactive_login:
-                await self._client.disconnect()
-                raise RuntimeError(
-                    "Telethon session is not authorized. Run `aidigest tg:whoami` first."
-                )
-            logger.info("Telethon session not authorized. Starting interactive login.")
-            await self._client.start()
+        if await self._client.is_user_authorized():
+            await self._ensure_user_session()
+            return
+
+        if not allow_interactive_login:
+            await self._client.disconnect()
+            raise RuntimeError("Telethon session is not authorized. Run `aidigest tg:whoami` first.")
+        logger.info("Telethon session not authorized. Starting interactive login.")
+        await self._client.start()
+        await self._ensure_user_session()
 
     async def disconnect(self) -> None:
         await self._client.disconnect()
@@ -103,6 +110,17 @@ class UserTelegramClient:
         if me.phone:
             return me.phone
         return str(me.id)
+
+    async def _ensure_user_session(self) -> None:
+        me: User | None = await self._client.get_me()
+        if me is None:
+            raise RuntimeError("Telethon session is authorized but profile is unavailable.")
+        if bool(getattr(me, "bot", False)):
+            await self._client.disconnect()
+            raise RuntimeError(
+                "Telethon session is authorized as bot. Only user sessions are supported. "
+                "Delete session file and run `aidigest tg:whoami` using your user account."
+            )
 
     async def resolve_entity(self, ref: str) -> Any:
         invite_hash = _extract_invite_hash(ref)

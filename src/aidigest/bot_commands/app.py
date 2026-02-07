@@ -23,7 +23,7 @@ def _make_client() -> UserTelegramClient:
 
 async def _on_startup(dispatcher: Dispatcher, client: UserTelegramClient) -> None:
     logger.info("Starting Telethon client for bot")
-    await client.connect()
+    await client.connect(allow_interactive_login=False)
 
 
 async def _on_shutdown(dispatcher: Dispatcher, client: UserTelegramClient) -> None:
