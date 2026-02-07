@@ -30,6 +30,7 @@ from aidigest.ingest.window import compute_window
 from aidigest.logging import configure_logging
 from aidigest.nlp.dedup import run_semantic_dedup
 from aidigest.nlp.summarize import summarize_window
+from aidigest.scheduler import run_daily_pipeline, run_scheduler
 from aidigest.bot_commands.app import run_bot_sync
 from aidigest.telegram.bot_client import DigestPublisher
 from aidigest.telegram.user_client import UserTelegramClient
@@ -578,6 +579,30 @@ def publish(target_date: date | None, force: bool) -> None:
             console.print(f"{idx}. message_id={message_id} link={link}")
         else:
             console.print(f"{idx}. message_id={message_id}")
+
+
+@main.command(name="run-once")
+@click.option("--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD.")
+def run_once(target_date: date | None) -> None:
+    """Run full daily pipeline once."""
+    stats = run_daily_pipeline(target_date=target_date)
+
+    table = Table(title="Pipeline Run Once")
+    table.add_column("metric", style="bold")
+    table.add_column("value")
+    table.add_row("duration", f"{stats.total_duration_seconds:.2f}s")
+    table.add_row("messages_sent", str(stats.messages_sent))
+    table.add_row("ingest fetched", str(stats.ingest.posts_fetched if stats.ingest else 0))
+    table.add_row("summarized", str(stats.summarize.summarized if stats.summarize else 0))
+    table.add_row("embedded", str(stats.embed.embedded if stats.embed else 0))
+    table.add_row("clusters", str(stats.dedup.clusters_created if stats.dedup else 0))
+    console.print(table)
+
+
+@main.command(name="scheduler:run")
+def scheduler_run() -> None:
+    """Run APScheduler loop for daily pipeline."""
+    run_scheduler()
 
 
 @main.command(name="summarize")

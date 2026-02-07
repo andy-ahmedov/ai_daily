@@ -232,6 +232,22 @@ aidigest publish
 # Already published for window ...
 ```
 
+## Scheduler
+
+Ежедневный запуск pipeline по расписанию (`RUN_AT_HOUR`, `RUN_AT_MINUTE`, `TIMEZONE`):
+
+```bash
+aidigest scheduler:run
+```
+
+Для теста и ручного прогона есть разовый запуск:
+
+```bash
+aidigest run-once --date 2026-02-07
+```
+
+Планировщик работает как сервисный процесс (systemd/docker можно добавить отдельно).
+
 ## Telegram bot
 
 1) Заполнить `BOT_TOKEN` и `ADMIN_TG_USER_ID` (или `ALLOWED_USER_IDS`) в `.env`.
