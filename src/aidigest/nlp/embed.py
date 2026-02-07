@@ -64,10 +64,10 @@ def _is_retryable_exception(exc: BaseException) -> bool:
 
 def _before_sleep(retry_state: RetryCallState) -> None:
     exc = retry_state.outcome.exception()
-    texts = retry_state.kwargs.get("texts", [])
+    text = retry_state.kwargs.get("text", "")
     logger.warning(
-        "Embedding retry: batch_size={} attempt={} reason={}",
-        len(texts),
+        "Embedding retry: text_len={} attempt={} reason={}",
+        len(str(text)),
         retry_state.attempt_number,
         exc.__class__.__name__ if exc is not None else "unknown",
     )
@@ -84,26 +84,21 @@ def _embed_with_retry(
     *,
     client: OpenAI,
     model_uri: str,
-    texts: list[str],
-) -> list[list[float]]:
+    text: str,
+) -> list[float]:
     response = client.embeddings.create(
         model=model_uri,
-        input=texts,
+        input=text,
         encoding_format="float",
     )
     data = sorted(response.data, key=lambda item: int(getattr(item, "index", 0)))
-    vectors: list[list[float]] = []
-    for item in data:
-        embedding = getattr(item, "embedding", None)
-        if embedding is None:
-            raise RuntimeError("embedding response item has no embedding")
-        vectors.append(validate_embedding(list(embedding)))
+    if len(data) != 1:
+        raise RuntimeError(f"embedding response size mismatch: expected 1, got {len(data)}")
 
-    if len(vectors) != len(texts):
-        raise RuntimeError(
-            f"embedding response size mismatch: expected {len(texts)}, got {len(vectors)}"
-        )
-    return vectors
+    embedding = getattr(data[0], "embedding", None)
+    if embedding is None:
+        raise RuntimeError("embedding response item has no embedding")
+    return validate_embedding(list(embedding))
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
@@ -115,8 +110,19 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
         raise RuntimeError("YANDEX_EMBED_MODEL_URI is not set")
 
     client = _DEFAULT_CLIENT or make_yandex_client(settings)
-    return _embed_with_retry(
-        client=client,
-        model_uri=settings.yandex_embed_model_uri,
-        texts=texts,
-    )
+    if len(texts) > 1:
+        logger.warning(
+            "Yandex embeddings API processes one text per request; splitting batch size={} into single requests",
+            len(texts),
+        )
+
+    vectors: list[list[float]] = []
+    for text in texts:
+        vectors.append(
+            _embed_with_retry(
+                client=client,
+                model_uri=settings.yandex_embed_model_uri,
+                text=text,
+            )
+        )
+    return vectors

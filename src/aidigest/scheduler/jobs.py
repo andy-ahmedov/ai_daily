@@ -141,25 +141,34 @@ def embed_window(*, start_at: datetime, end_at: datetime, batch_size: int = 16) 
     embedded = 0
     failed_batches = 0
     failed_posts = 0
+    warned_single_requests = False
 
     if total_candidates:
         make_yandex_client(settings)
         for offset in range(0, total_candidates, batch_size):
             batch = posts[offset : offset + batch_size]
-            texts = [str(post.text or "") for post in batch]
-            if not texts:
+            if not batch:
                 continue
+            if batch_size > 1 and not warned_single_requests:
+                logger.warning(
+                    "pipeline stage=embed yandex processes one text per request; batch_size={} split into single requests",
+                    batch_size,
+                )
+                warned_single_requests = True
+
+            batch_had_errors = False
             try:
-                vectors = embed_texts(texts)
-                if len(vectors) != len(batch):
-                    raise RuntimeError(
-                        f"batch size mismatch: expected {len(batch)}, got {len(vectors)}"
-                    )
-                for post, vector in zip(batch, vectors):
-                    update_post_embedding(post.id, validate_embedding(vector))
-                    embedded += 1
-            except Exception as exc:
-                failed_batches += 1
+                for post in batch:
+                    try:
+                        vector = embed_texts([str(post.text or "")])[0]
+                        update_post_embedding(post.id, validate_embedding(vector))
+                        embedded += 1
+                    except Exception as exc:
+                        batch_had_errors = True
+                        failed_posts += 1
+                        logger.error("pipeline stage=embed post failed post_id={} error={}", post.id, exc)
+            except Exception as exc:  # pragma: no cover - defensive wrapper around batch loop
+                batch_had_errors = True
                 failed_posts += len(batch)
                 logger.error(
                     "pipeline stage=embed batch failed offset={} size={} error={}",
@@ -168,6 +177,8 @@ def embed_window(*, start_at: datetime, end_at: datetime, batch_size: int = 16) 
                     exc,
                 )
             finally:
+                if batch_had_errors:
+                    failed_batches += 1
                 if offset + batch_size < total_candidates:
                     time.sleep(random.uniform(0.1, 0.3))
 
