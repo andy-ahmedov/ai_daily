@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from aidigest.db.models import Post
 
-
 ALLOWED_TAGS = (
     "News",
     "Research",
@@ -43,4 +42,3 @@ def build_post_prompt(post: Post) -> str:
         "Post text:\n"
         f"{text_block}\n"
     )
-

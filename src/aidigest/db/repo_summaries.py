@@ -12,8 +12,9 @@ from aidigest.db.session import get_session
 def has_summary(post_id: int) -> bool:
     with get_session() as session:
         return (
-            session.execute(select(PostSummary.post_id).where(PostSummary.post_id == post_id))
-            .scalar_one_or_none()
+            session.execute(
+                select(PostSummary.post_id).where(PostSummary.post_id == post_id)
+            ).scalar_one_or_none()
             is not None
         )
 
@@ -26,25 +27,31 @@ def upsert_summary(
     tags: list[str],
     importance: int,
 ) -> PostSummary:
-    stmt = pg_insert(PostSummary).values(
-        post_id=post_id,
-        key_point=key_point,
-        why_it_matters=why_it_matters,
-        tags=tags,
-        importance=importance,
-    ).on_conflict_do_update(
-        index_elements=[PostSummary.post_id],
-        set_={
-            "key_point": key_point,
-            "why_it_matters": why_it_matters,
-            "tags": tags,
-            "importance": importance,
-        },
+    stmt = (
+        pg_insert(PostSummary)
+        .values(
+            post_id=post_id,
+            key_point=key_point,
+            why_it_matters=why_it_matters,
+            tags=tags,
+            importance=importance,
+        )
+        .on_conflict_do_update(
+            index_elements=[PostSummary.post_id],
+            set_={
+                "key_point": key_point,
+                "why_it_matters": why_it_matters,
+                "tags": tags,
+                "importance": importance,
+            },
+        )
     )
 
     with get_session() as session:
         session.execute(stmt)
-        return session.execute(select(PostSummary).where(PostSummary.post_id == post_id)).scalar_one()
+        return session.execute(
+            select(PostSummary).where(PostSummary.post_id == post_id)
+        ).scalar_one()
 
 
 def get_posts_in_window(start_at: datetime, end_at: datetime, limit: int) -> list[Post]:

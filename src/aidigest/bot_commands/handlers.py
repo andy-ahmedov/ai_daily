@@ -13,8 +13,6 @@ from sqlalchemy import text
 
 from aidigest.bot_commands.auth import is_user_allowed
 from aidigest.config import get_settings
-from aidigest.db.repo_dedup_clusters import get_or_create_window
-from aidigest.db.repo_digests import get_digest_by_window
 from aidigest.db.engine import get_engine
 from aidigest.db.repo_channels import (
     get_channel_by_peer_id,
@@ -23,6 +21,8 @@ from aidigest.db.repo_channels import (
     set_channel_active,
     upsert_channel,
 )
+from aidigest.db.repo_dedup_clusters import get_or_create_window
+from aidigest.db.repo_digests import get_digest_by_window
 from aidigest.db.repo_stats import (
     count_channels,
     count_clusters,
@@ -35,7 +35,6 @@ from aidigest.db.repo_stats import (
 from aidigest.ingest.window import compute_window
 from aidigest.scheduler.jobs import run_daily_pipeline
 from aidigest.telegram.user_client import UserTelegramClient
-
 
 router = Router()
 _digest_now_task: asyncio.Task[None] | None = None
@@ -244,8 +243,12 @@ async def cmd_status(message: Message) -> None:
     active_channels = safe_value(lambda: count_channels(active_only=True))
     total_channels = safe_value(lambda: count_channels(active_only=False))
     posts_in_window = safe_value(lambda: count_posts_in_window(start_at=start_at, end_at=end_at))
-    missing_summaries = safe_value(lambda: count_missing_summaries(start_at=start_at, end_at=end_at))
-    missing_embeddings = safe_value(lambda: count_missing_embeddings(start_at=start_at, end_at=end_at))
+    missing_summaries = safe_value(
+        lambda: count_missing_summaries(start_at=start_at, end_at=end_at)
+    )
+    missing_embeddings = safe_value(
+        lambda: count_missing_embeddings(start_at=start_at, end_at=end_at)
+    )
 
     window_row = None
     clusters = "N/A"

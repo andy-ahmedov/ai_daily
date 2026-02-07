@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pgvector.sqlalchemy import Vector
 import sqlalchemy as sa
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -13,7 +14,6 @@ from sqlalchemy import (
     Identity,
     Index,
     Integer,
-    BigInteger,
     SmallInteger,
     Text,
     UniqueConstraint,
@@ -57,7 +57,9 @@ class Post(Base):
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
-    has_media: Mapped[bool] = mapped_column(Boolean, server_default=sa.text("false"), nullable=False)
+    has_media: Mapped[bool] = mapped_column(
+        Boolean, server_default=sa.text("false"), nullable=False
+    )
     views: Mapped[int | None] = mapped_column(Integer, nullable=True)
     forwards: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reactions: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
@@ -91,9 +93,7 @@ class PostSummary(Base):
 
 class Window(Base):
     __tablename__ = "windows"
-    __table_args__ = (
-        UniqueConstraint("start_at", "end_at", name="windows_range_uidx"),
-    )
+    __table_args__ = (UniqueConstraint("start_at", "end_at", name="windows_range_uidx"),)
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -5,7 +5,6 @@ from zoneinfo import ZoneInfo
 
 from aidigest.digest.build import DigestChannelSection, DigestData, DigestPostItem, DigestTopCluster
 
-
 MAX_MESSAGE_LEN = 3900
 
 

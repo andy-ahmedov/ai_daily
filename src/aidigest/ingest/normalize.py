@@ -4,7 +4,6 @@ import hashlib
 import re
 from datetime import datetime
 
-
 _ZERO_WIDTH_RE = re.compile(r"[\u200B-\u200D\uFEFF]")
 _INLINE_WHITESPACE_RE = re.compile(r"[ \t]+")
 _EMPTY_LINES_RE = re.compile(r"\n{3,}")

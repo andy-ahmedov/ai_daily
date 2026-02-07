@@ -4,10 +4,15 @@ from math import isfinite
 
 from loguru import logger
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
-from tenacity import RetryCallState, retry, retry_if_exception, stop_after_attempt, wait_random_exponential
+from tenacity import (
+    RetryCallState,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_random_exponential,
+)
 
 from aidigest.config import Settings, get_settings
-
 
 _DEFAULT_CLIENT: OpenAI | None = None
 

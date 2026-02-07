@@ -7,7 +7,6 @@ from aidigest.config import get_settings
 from aidigest.db.models import Setting
 from aidigest.db.session import get_session
 
-
 _ADMIN_SETTING_KEY = "admin_user_id"
 
 

@@ -16,7 +16,6 @@ from aidigest.db.repo_summaries import get_posts_in_window, has_summary, upsert_
 from aidigest.db.session import get_session
 from aidigest.nlp.prompts import ALLOWED_TAGS, SYSTEM_PROMPT, build_post_prompt
 
-
 _ALLOWED_TAGS_BY_LOWER = {tag.lower(): tag for tag in ALLOWED_TAGS}
 
 
@@ -56,20 +55,24 @@ def get_or_copy_summary_for_post(post_id: int) -> SummarySnapshot | None:
         return None
 
     source_post_id, matched_summary = matched
-    stmt = pg_insert(PostSummary).values(
-        post_id=post_id,
-        key_point=matched_summary.key_point,
-        why_it_matters=matched_summary.why_it_matters,
-        tags=matched_summary.tags,
-        importance=matched_summary.importance,
-    ).on_conflict_do_update(
-        index_elements=[PostSummary.post_id],
-        set_={
-            "key_point": matched_summary.key_point,
-            "why_it_matters": matched_summary.why_it_matters,
-            "tags": matched_summary.tags,
-            "importance": matched_summary.importance,
-        },
+    stmt = (
+        pg_insert(PostSummary)
+        .values(
+            post_id=post_id,
+            key_point=matched_summary.key_point,
+            why_it_matters=matched_summary.why_it_matters,
+            tags=matched_summary.tags,
+            importance=matched_summary.importance,
+        )
+        .on_conflict_do_update(
+            index_elements=[PostSummary.post_id],
+            set_={
+                "key_point": matched_summary.key_point,
+                "why_it_matters": matched_summary.why_it_matters,
+                "tags": matched_summary.tags,
+                "importance": matched_summary.importance,
+            },
+        )
     )
 
     with get_session() as session:

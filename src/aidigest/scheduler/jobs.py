@@ -186,7 +186,9 @@ def embed_window(*, start_at: datetime, end_at: datetime, batch_size: int = 16) 
     return stats
 
 
-def dedup_window(*, start_at: datetime, end_at: datetime, threshold: float, top_k: int = 80) -> DedupStats:
+def dedup_window(
+    *, start_at: datetime, end_at: datetime, threshold: float, top_k: int = 80
+) -> DedupStats:
     started_at = time.monotonic()
     stats = run_semantic_dedup(
         start_at=start_at,
@@ -205,7 +207,9 @@ def dedup_window(*, start_at: datetime, end_at: datetime, threshold: float, top_
     return stats
 
 
-def publish_window(*, settings: Settings, window_id: int, start_at: datetime, end_at: datetime) -> int:
+def publish_window(
+    *, settings: Settings, window_id: int, start_at: datetime, end_at: datetime
+) -> int:
     chat_id = _parse_chat_id(settings.digest_channel_id)
     if chat_id is None:
         raise RuntimeError("DIGEST_CHANNEL_ID must be a Telegram chat_id (e.g. -100...)")

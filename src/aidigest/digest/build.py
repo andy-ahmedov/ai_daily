@@ -142,7 +142,9 @@ def _build_per_channel(
 ) -> list[DigestChannelSection]:
     sections: list[DigestChannelSection] = []
     for channel in channels:
-        channel_posts = sorted(posts_by_channel.get(channel.id, []), key=lambda item: item.posted_at)
+        channel_posts = sorted(
+            posts_by_channel.get(channel.id, []), key=lambda item: item.posted_at
+        )
         channel_name = _source_name(channel.username, channel.title)
         sections.append(
             DigestChannelSection(

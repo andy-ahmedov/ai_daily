@@ -26,8 +26,4 @@ def get_posts_missing_embedding(start_at: datetime, end_at: datetime, limit: int
 
 def update_post_embedding(post_id: int, embedding_vector: list[float]) -> None:
     with get_session() as session:
-        session.execute(
-            update(Post)
-            .where(Post.id == post_id)
-            .values(embedding=embedding_vector)
-        )
+        session.execute(update(Post).where(Post.id == post_id).values(embedding=embedding_vector))

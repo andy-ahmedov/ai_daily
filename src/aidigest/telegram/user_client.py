@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -19,7 +19,6 @@ from telethon.tl.functions.channels import JoinChannelRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest
 from telethon.tl.types import Channel, Chat, User
 from telethon.utils import get_peer_id, resolve_id
-
 
 _INVITE_RE = re.compile(r"(?:^|/)joinchat/(?P<hash>[\w-]+)$", re.IGNORECASE)
 
@@ -88,7 +87,9 @@ class UserTelegramClient:
         if not await self._client.is_user_authorized():
             if not allow_interactive_login:
                 await self._client.disconnect()
-                raise RuntimeError("Telethon session is not authorized. Run `aidigest tg:whoami` first.")
+                raise RuntimeError(
+                    "Telethon session is not authorized. Run `aidigest tg:whoami` first."
+                )
             logger.info("Telethon session not authorized. Starting interactive login.")
             await self._client.start()
 

@@ -55,9 +55,13 @@ def upsert_post(
         "lang": lang,
     }
 
-    stmt = pg_insert(Post).values(**values).on_conflict_do_update(
-        index_elements=[Post.channel_id, Post.message_id],
-        set_=update_values,
+    stmt = (
+        pg_insert(Post)
+        .values(**values)
+        .on_conflict_do_update(
+            index_elements=[Post.channel_id, Post.message_id],
+            set_=update_values,
+        )
     )
 
     with get_session() as session:
@@ -92,4 +96,3 @@ def get_existing_message_ids(channel_id: int, message_ids: Iterable[int]) -> set
             )
         ).scalars()
         return {int(value) for value in rows}
-

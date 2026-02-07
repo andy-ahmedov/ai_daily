@@ -3,11 +3,11 @@ from __future__ import annotations
 import os
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from aidigest.config import get_settings
 from aidigest.db.models import Base
+from alembic import context
 
 config = context.config
 

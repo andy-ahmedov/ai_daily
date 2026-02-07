@@ -15,14 +15,15 @@ from rich.table import Table
 from sqlalchemy import inspect, text
 
 from aidigest import __version__
+from aidigest.bot_commands.app import run_bot_sync
 from aidigest.config import get_settings
-from aidigest.db.repo_dedup_clusters import get_or_create_window
-from aidigest.db.repo_digests import get_digest_by_window, upsert_digest
-from aidigest.db.repo_digest import get_window_by_range
-from aidigest.db.repo_embeddings import get_posts_missing_embedding, update_post_embedding
-from aidigest.db.repo_dedup import top_hash_groups_in_window
 from aidigest.db.engine import get_engine
 from aidigest.db.repo_channels import list_channels, upsert_channel
+from aidigest.db.repo_dedup import top_hash_groups_in_window
+from aidigest.db.repo_dedup_clusters import get_or_create_window
+from aidigest.db.repo_digest import get_window_by_range
+from aidigest.db.repo_digests import get_digest_by_window, upsert_digest
+from aidigest.db.repo_embeddings import get_posts_missing_embedding, update_post_embedding
 from aidigest.digest.build import build_digest_data
 from aidigest.digest.format import render_digest_html
 from aidigest.ingest import ingest_posts_for_date
@@ -31,10 +32,8 @@ from aidigest.logging import configure_logging
 from aidigest.nlp.dedup import run_semantic_dedup
 from aidigest.nlp.summarize import summarize_window
 from aidigest.scheduler import run_daily_pipeline, run_scheduler
-from aidigest.bot_commands.app import run_bot_sync
 from aidigest.telegram.bot_client import DigestPublisher
 from aidigest.telegram.user_client import UserTelegramClient
-
 
 console = Console()
 
@@ -315,7 +314,9 @@ def bot_run() -> None:
 
 
 @main.command(name="ingest")
-@click.option("--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD.")
+@click.option(
+    "--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD."
+)
 @click.option("--dry-run", is_flag=True, help="Fetch posts and print stats without writing to DB.")
 def ingest(target_date: date | None, dry_run: bool) -> None:
     """Ingest channel posts for daily [13:00, 13:00) window."""
@@ -383,7 +384,9 @@ def ingest(target_date: date | None, dry_run: bool) -> None:
 
 
 @main.command(name="dedup:report")
-@click.option("--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD.")
+@click.option(
+    "--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD."
+)
 def dedup_report(target_date: date | None) -> None:
     """Show top exact-duplicate groups by content_hash for ingest window."""
     settings = get_settings()
@@ -412,9 +415,13 @@ def dedup_report(target_date: date | None) -> None:
 
 
 @main.command(name="dedup")
-@click.option("--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD.")
+@click.option(
+    "--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD."
+)
 @click.option("--threshold", type=float, help="Cosine similarity threshold (0..1).")
-@click.option("--top-k", default=80, show_default=True, type=int, help="Top similar posts per cluster center.")
+@click.option(
+    "--top-k", default=80, show_default=True, type=int, help="Top similar posts per cluster center."
+)
 @click.option("--dry-run", is_flag=True, help="Calculate clusters without writing to DB.")
 def dedup(target_date: date | None, threshold: float | None, top_k: int, dry_run: bool) -> None:
     """Cluster semantically similar posts in ingest window."""
@@ -472,8 +479,12 @@ def dedup(target_date: date | None, threshold: float | None, top_k: int, dry_run
 
 
 @main.command(name="digest")
-@click.option("--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD.")
-@click.option("--top", default=10, show_default=True, type=int, help="Top-N clusters in first message.")
+@click.option(
+    "--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD."
+)
+@click.option(
+    "--top", default=10, show_default=True, type=int, help="Top-N clusters in first message."
+)
 @click.option("--dry-run", is_flag=True, help="No DB writes (digest currently read-only).")
 def digest(target_date: date | None, top: int, dry_run: bool) -> None:
     """Build Telegram HTML digest and print it to stdout."""
@@ -512,8 +523,12 @@ def digest(target_date: date | None, top: int, dry_run: bool) -> None:
 
 
 @main.command(name="publish")
-@click.option("--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD.")
-@click.option("--force", is_flag=True, help="Publish again even if this window was published before.")
+@click.option(
+    "--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD."
+)
+@click.option(
+    "--force", is_flag=True, help="Publish again even if this window was published before."
+)
 def publish(target_date: date | None, force: bool) -> None:
     """Publish rendered digest to Telegram channel and persist message ids."""
     settings = get_settings()
@@ -582,7 +597,9 @@ def publish(target_date: date | None, force: bool) -> None:
 
 
 @main.command(name="run-once")
-@click.option("--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD.")
+@click.option(
+    "--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD."
+)
 def run_once(target_date: date | None) -> None:
     """Run full daily pipeline once."""
     stats = run_daily_pipeline(target_date=target_date)
@@ -606,7 +623,9 @@ def scheduler_run() -> None:
 
 
 @main.command(name="summarize")
-@click.option("--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD.")
+@click.option(
+    "--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD."
+)
 @click.option("--limit", default=100, show_default=True, type=int, help="Max posts to process.")
 @click.option("--dry-run", is_flag=True, help="Calculate actions without writing summaries.")
 def summarize(target_date: date | None, limit: int, dry_run: bool) -> None:
@@ -643,7 +662,9 @@ def summarize(target_date: date | None, limit: int, dry_run: bool) -> None:
 
 
 @main.command(name="embed")
-@click.option("--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD.")
+@click.option(
+    "--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD."
+)
 @click.option("--limit", default=200, show_default=True, type=int, help="Max posts to process.")
 @click.option(
     "--batch-size",

@@ -85,4 +85,3 @@ def top_hash_groups_in_window(
                 )
             )
         return groups
-

@@ -6,8 +6,13 @@ from typing import Any
 
 import httpx
 from loguru import logger
-from tenacity import RetryCallState, retry, retry_if_exception, stop_after_attempt, wait_random_exponential
-
+from tenacity import (
+    RetryCallState,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_random_exponential,
+)
 
 _DEFAULT_WAIT = wait_random_exponential(multiplier=0.5, min=0.5, max=10)
 
@@ -158,9 +163,13 @@ class DigestPublisher:
             error_code = payload.get("error_code")
             description = str(payload.get("description", "telegram api error"))
             retry_after = _extract_retry_after(payload)
-            retryable = bool(error_code == 429 or (isinstance(error_code, int) and error_code >= 500))
+            retryable = bool(
+                error_code == 429 or (isinstance(error_code, int) and error_code >= 500)
+            )
             raise TelegramAPIError(
-                status_code=int(error_code) if isinstance(error_code, int) else response.status_code,
+                status_code=int(error_code)
+                if isinstance(error_code, int)
+                else response.status_code,
                 description=description,
                 retry_after=retry_after,
                 retryable=retryable,

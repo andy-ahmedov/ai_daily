@@ -248,6 +248,21 @@ aidigest run-once --date 2026-02-07
 
 Планировщик работает как сервисный процесс (systemd/docker можно добавить отдельно).
 
+## Quality
+
+Проверка линтинга:
+
+```bash
+ruff check .
+ruff format .
+```
+
+Запуск тестов:
+
+```bash
+pytest
+```
+
 ## Telegram bot
 
 1) Заполнить `BOT_TOKEN` и `ADMIN_TG_USER_ID` (или `ALLOWED_USER_IDS`) в `.env`.

@@ -16,4 +16,3 @@ def compute_window(
     end_at = datetime.combine(target_date, time(hour=start_hour), tzinfo=timezone)
     start_at = end_at - timedelta(days=1)
     return start_at, end_at
-

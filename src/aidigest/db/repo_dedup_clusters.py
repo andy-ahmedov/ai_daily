@@ -25,8 +25,10 @@ class SimilarPost:
 
 
 def get_or_create_window(start_at: datetime, end_at: datetime) -> Window:
-    stmt = pg_insert(Window).values(start_at=start_at, end_at=end_at).on_conflict_do_nothing(
-        index_elements=[Window.start_at, Window.end_at]
+    stmt = (
+        pg_insert(Window)
+        .values(start_at=start_at, end_at=end_at)
+        .on_conflict_do_nothing(index_elements=[Window.start_at, Window.end_at])
     )
     with get_session() as session:
         session.execute(stmt)
@@ -43,11 +45,15 @@ def set_window_status(window_id: int, status: str) -> None:
 def clear_clusters_for_window(window_id: int) -> None:
     with get_session() as session:
         cluster_ids = select(DedupCluster.id).where(DedupCluster.window_id == window_id)
-        session.execute(delete(DedupClusterPost).where(DedupClusterPost.cluster_id.in_(cluster_ids)))
+        session.execute(
+            delete(DedupClusterPost).where(DedupClusterPost.cluster_id.in_(cluster_ids))
+        )
         session.execute(delete(DedupCluster).where(DedupCluster.window_id == window_id))
 
 
-def create_cluster(window_id: int, representative_post_id: int, label: str | None = None) -> DedupCluster:
+def create_cluster(
+    window_id: int, representative_post_id: int, label: str | None = None
+) -> DedupCluster:
     stmt = pg_insert(DedupCluster).values(
         window_id=window_id,
         representative_post_id=representative_post_id,
@@ -93,7 +99,9 @@ def get_posts_for_semantic_dedup(start_at: datetime, end_at: datetime) -> list[D
                 Post.posted_at < end_at,
                 Post.embedding.is_not(None),
             )
-            .order_by(PostSummary.importance.desc().nullslast(), Post.posted_at.asc(), Post.id.asc())
+            .order_by(
+                PostSummary.importance.desc().nullslast(), Post.posted_at.asc(), Post.id.asc()
+            )
         ).all()
 
         result: list[DedupPost] = []
@@ -156,6 +164,5 @@ def find_similar_posts_for_embedding(
 
         rows = session.execute(stmt).all()
         return [
-            SimilarPost(post_id=int(row.post_id), similarity=float(row.similarity))
-            for row in rows
+            SimilarPost(post_id=int(row.post_id), similarity=float(row.similarity)) for row in rows
         ]

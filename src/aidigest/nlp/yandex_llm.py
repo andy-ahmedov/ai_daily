@@ -6,10 +6,15 @@ from typing import Any
 
 from loguru import logger
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
-from tenacity import RetryCallState, retry, retry_if_exception, stop_after_attempt, wait_random_exponential
+from tenacity import (
+    RetryCallState,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_random_exponential,
+)
 
 from aidigest.config import Settings
-
 
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL | re.IGNORECASE)
 
