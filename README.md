@@ -266,4 +266,11 @@ aidigest bot:run
 /remove @telegram
 /list_all
 /status
+/digest-now
 ```
+
+## Bot operations
+
+- `/status` показывает состояние системы: каналы, окно, посты без summary/embedding, кластеры, последний published digest и расписание.
+- `/digest-now` запускает полный pipeline для текущего окна вручную.
+  Если digest уже опубликован, бот сообщает время публикации и message ids (и ссылку на первое сообщение, если возможно).
