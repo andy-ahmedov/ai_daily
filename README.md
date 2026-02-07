@@ -139,6 +139,35 @@ aidigest summarize --date 2026-02-07 --limit 50
 
 Команда сначала переиспользует exact-dedup summary по `content_hash`, и только для оставшихся постов вызывает LLM.
 
+## Embeddings
+
+Нужные переменные в `.env`:
+
+- `YANDEX_API_KEY`
+- `YANDEX_FOLDER_ID`
+- `YANDEX_EMBED_MODEL_URI` (например: `emb://<folder_id>/text-search-doc/latest`)
+- `EMBED_DIM=256`
+
+После ingest можно посчитать эмбеддинги для постов без `embedding`:
+
+```bash
+aidigest embed --limit 200
+```
+
+Пример с размером батча:
+
+```bash
+aidigest embed --limit 20 --batch-size 10
+```
+
+Проверка в БД:
+
+```bash
+psql "$DATABASE_URL" -c "SELECT count(*) FROM posts WHERE embedding IS NOT NULL;"
+```
+
+Повторный запуск не переэмбеддит посты, у которых `embedding` уже заполнен.
+
 ## Telegram bot
 
 1) Заполнить `BOT_TOKEN` и `ADMIN_TG_USER_ID` (или `ALLOWED_USER_IDS`) в `.env`.

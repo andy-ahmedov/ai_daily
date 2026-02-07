@@ -19,6 +19,7 @@ dependencies = [
   "sqlalchemy",
   "alembic",
   "psycopg[binary]",
+  "pgvector",
   "httpx",
   "apscheduler",
   "tenacity",

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from pgvector.sqlalchemy import Vector
 import sqlalchemy as sa
 from sqlalchemy import (
     Boolean,
@@ -19,17 +20,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy.types import UserDefinedType
-
-
-class Vector(UserDefinedType):
-    cache_ok = True
-
-    def __init__(self, dimensions: int) -> None:
-        self.dimensions = dimensions
-
-    def get_col_spec(self, **kw: Any) -> str:
-        return f"VECTOR({self.dimensions})"
 
 
 class Base(DeclarativeBase):

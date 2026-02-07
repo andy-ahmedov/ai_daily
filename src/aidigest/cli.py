@@ -1,18 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import random
+import time
 from datetime import date, datetime
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import click
 from dotenv import load_dotenv
+from loguru import logger
 from rich.console import Console
 from rich.table import Table
 from sqlalchemy import inspect, text
 
 from aidigest import __version__
 from aidigest.config import get_settings
+from aidigest.db.repo_embeddings import get_posts_missing_embedding, update_post_embedding
 from aidigest.db.repo_dedup import top_hash_groups_in_window
 from aidigest.db.engine import get_engine
 from aidigest.db.repo_channels import list_channels, upsert_channel
@@ -105,6 +109,7 @@ def doctor() -> None:
         "DATABASE_URL": _redact_database_url(settings.database_url),
         "YANDEX_FOLDER_ID": settings.yandex_folder_id,
         "YANDEX_MODEL_URI": settings.yandex_model_uri,
+        "YANDEX_EMBED_MODEL_URI": settings.yandex_embed_model_uri,
         "EMBED_DIM": settings.embed_dim,
         "DEDUP_THRESHOLD": settings.dedup_threshold,
     }
@@ -157,6 +162,21 @@ def doctor() -> None:
             console.print(f"Yandex LLM: ERROR {exc}")
     else:
         console.print("Yandex LLM: not configured")
+
+    if settings.yandex_api_key and settings.yandex_folder_id and settings.yandex_embed_model_uri:
+        try:
+            from aidigest.nlp.embed import embed_texts, make_yandex_client, validate_embedding
+
+            make_yandex_client(settings)
+            vectors = embed_texts(["ping"])
+            if len(vectors) != 1:
+                raise RuntimeError(f"unexpected vectors count: {len(vectors)}")
+            validate_embedding(vectors[0])
+            console.print("Yandex Embeddings: OK")
+        except Exception as exc:
+            console.print(f"Yandex Embeddings: ERROR {exc}")
+    else:
+        console.print("Yandex Embeddings: SKIPPED")
 
 
 @main.command(name="tg:whoami")
@@ -396,4 +416,93 @@ def summarize(target_date: date | None, limit: int, dry_run: bool) -> None:
     table.add_row("copied_exact_dup", str(stats.copied_exact_dup))
     table.add_row("summarized", str(stats.summarized))
     table.add_row("errors", str(stats.errors))
+    console.print(table)
+
+
+@main.command(name="embed")
+@click.option("--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD.")
+@click.option("--limit", default=200, show_default=True, type=int, help="Max posts to process.")
+@click.option(
+    "--batch-size",
+    default=16,
+    show_default=True,
+    type=int,
+    help="Embedding API batch size.",
+)
+@click.option("--dry-run", is_flag=True, help="Calculate actions without writing embeddings.")
+def embed(target_date: date | None, limit: int, batch_size: int, dry_run: bool) -> None:
+    """Compute embeddings for posts without vectors in ingest window."""
+    if limit <= 0:
+        raise click.BadParameter("--limit must be > 0")
+    if batch_size <= 0:
+        raise click.BadParameter("--batch-size must be > 0")
+
+    settings = get_settings()
+    effective_date = target_date or datetime.now(ZoneInfo(settings.timezone)).date()
+    start_at, end_at = compute_window(
+        target_date=effective_date,
+        tz=settings.timezone,
+        start_hour=settings.window_start_hour,
+    )
+    console.print(f"Window: {start_at.isoformat()} -> {end_at.isoformat()} ({settings.timezone})")
+
+    posts = get_posts_missing_embedding(start_at=start_at, end_at=end_at, limit=limit)
+    total_candidates = len(posts)
+
+    if dry_run:
+        console.print(f"Dry-run: would process {total_candidates} posts.")
+        return
+
+    if total_candidates == 0:
+        console.print("No posts missing embeddings in this window.")
+        return
+
+    if not settings.yandex_api_key or not settings.yandex_folder_id:
+        raise click.ClickException("YANDEX_API_KEY and YANDEX_FOLDER_ID must be set for embed.")
+    if not settings.yandex_embed_model_uri:
+        raise click.ClickException("YANDEX_EMBED_MODEL_URI must be set for embed.")
+
+    from aidigest.nlp.embed import embed_texts, make_yandex_client, validate_embedding
+
+    make_yandex_client(settings)
+
+    embedded = 0
+    failed_batches = 0
+    failed_posts = 0
+
+    for offset in range(0, total_candidates, batch_size):
+        batch = posts[offset : offset + batch_size]
+        texts = [str(post.text or "") for post in batch]
+        if not texts:
+            continue
+
+        try:
+            vectors = embed_texts(texts)
+            if len(vectors) != len(batch):
+                raise RuntimeError(
+                    f"batch size mismatch: expected {len(batch)}, got {len(vectors)}"
+                )
+            for post, vector in zip(batch, vectors):
+                update_post_embedding(post.id, validate_embedding(vector))
+                embedded += 1
+        except Exception as exc:
+            failed_batches += 1
+            failed_posts += len(batch)
+            logger.error(
+                "embedding batch failed offset={} size={} error={}",
+                offset,
+                len(batch),
+                exc,
+            )
+        finally:
+            if offset + batch_size < total_candidates:
+                time.sleep(random.uniform(0.1, 0.3))
+
+    table = Table(title="Embed")
+    table.add_column("metric", style="bold")
+    table.add_column("value")
+    table.add_row("total candidates", str(total_candidates))
+    table.add_row("embedded", str(embedded))
+    table.add_row("failed batches", str(failed_batches))
+    table.add_row("failed posts", str(failed_posts))
     console.print(table)
