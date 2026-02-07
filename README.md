@@ -191,6 +191,27 @@ aidigest dedup --date 2026-02-07 --dry-run
 
 Повторный запуск за то же окно пересчитывает результат: старые кластеры удаляются и создаются заново.
 
+## Build digest
+
+Последовательность для дневного прогона:
+
+```bash
+aidigest ingest
+aidigest summarize --limit 100
+aidigest embed --limit 200
+aidigest dedup
+aidigest digest --top 10
+```
+
+`aidigest digest` не отправляет сообщение в Telegram, а печатает HTML-блоки в stdout:
+
+```text
+----- MESSAGE 1/3 -----
+<b>AI Digest</b> ...
+```
+
+Каждый блок уже подготовлен под Telegram HTML и ограничен по длине.
+
 ## Telegram bot
 
 1) Заполнить `BOT_TOKEN` и `ADMIN_TG_USER_ID` (или `ALLOWED_USER_IDS`) в `.env`.

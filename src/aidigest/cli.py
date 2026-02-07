@@ -16,10 +16,13 @@ from sqlalchemy import inspect, text
 
 from aidigest import __version__
 from aidigest.config import get_settings
+from aidigest.db.repo_digest import get_window_by_range
 from aidigest.db.repo_embeddings import get_posts_missing_embedding, update_post_embedding
 from aidigest.db.repo_dedup import top_hash_groups_in_window
 from aidigest.db.engine import get_engine
 from aidigest.db.repo_channels import list_channels, upsert_channel
+from aidigest.digest.build import build_digest_data
+from aidigest.digest.format import render_digest_html
 from aidigest.ingest import ingest_posts_for_date
 from aidigest.ingest.window import compute_window
 from aidigest.logging import configure_logging
@@ -441,6 +444,46 @@ def dedup(target_date: date | None, threshold: float | None, top_k: int, dry_run
                 str(len(cluster.members)),
             )
         console.print(top_table)
+
+
+@main.command(name="digest")
+@click.option("--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD.")
+@click.option("--top", default=10, show_default=True, type=int, help="Top-N clusters in first message.")
+@click.option("--dry-run", is_flag=True, help="No DB writes (digest currently read-only).")
+def digest(target_date: date | None, top: int, dry_run: bool) -> None:
+    """Build Telegram HTML digest and print it to stdout."""
+    if top <= 0:
+        raise click.BadParameter("--top must be > 0")
+
+    settings = get_settings()
+    effective_date = target_date or datetime.now(ZoneInfo(settings.timezone)).date()
+    start_at, end_at = compute_window(
+        target_date=effective_date,
+        tz=settings.timezone,
+        start_hour=settings.window_start_hour,
+    )
+    window = get_window_by_range(start_at=start_at, end_at=end_at)
+    window_id = window.id if window is not None else None
+
+    digest_data = build_digest_data(
+        start_at=start_at,
+        end_at=end_at,
+        window_id=window_id,
+        top_n=top,
+    )
+    messages = render_digest_html(digest_data)
+
+    click.echo(
+        f"Digest window: {start_at.isoformat()} -> {end_at.isoformat()} ({settings.timezone}) "
+        f"top={top} dry_run={dry_run}"
+    )
+    if window_id is None:
+        click.echo("Window not found in DB; using fallback Top list (content_hash dedup).")
+
+    total = len(messages)
+    for idx, message in enumerate(messages, start=1):
+        click.echo(f"----- MESSAGE {idx}/{total} -----")
+        click.echo(message)
 
 
 @main.command(name="summarize")
