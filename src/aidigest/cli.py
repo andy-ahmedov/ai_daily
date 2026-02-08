@@ -151,6 +151,10 @@ def doctor() -> None:
         "YANDEX_EMBED_MODEL_URI": settings.yandex_embed_model_uri,
         "EMBED_DIM": settings.embed_dim,
         "DEDUP_THRESHOLD": settings.dedup_threshold,
+        "TOP_K_PER_CHANNEL": settings.top_k_per_channel,
+        "MIN_IMPORTANCE_CHANNEL": settings.min_importance_channel,
+        "TOP_K_GLOBAL": settings.top_k_global,
+        "MIN_IMPORTANCE_GLOBAL": settings.min_importance_global,
     }
 
     for key, value in safe_values.items():
@@ -523,15 +527,19 @@ def dedup(target_date: date | None, threshold: float | None, top_k: int, dry_run
     "--date", "target_date", callback=_parse_target_date, help="Target date in YYYY-MM-DD."
 )
 @click.option(
-    "--top", default=10, show_default=True, type=int, help="Top-N clusters in first message."
+    "--top",
+    default=None,
+    type=int,
+    help="Override Top-N global items (default: TOP_K_GLOBAL from settings).",
 )
 @click.option("--dry-run", is_flag=True, help="No DB writes (digest currently read-only).")
-def digest(target_date: date | None, top: int, dry_run: bool) -> None:
+def digest(target_date: date | None, top: int | None, dry_run: bool) -> None:
     """Build Telegram HTML digest and print it to stdout."""
-    if top <= 0:
+    settings = get_settings()
+    top_limit = settings.top_k_global if top is None else top
+    if top_limit <= 0:
         raise click.BadParameter("--top must be > 0")
 
-    settings = get_settings()
     effective_date = target_date or datetime.now(ZoneInfo(settings.timezone)).date()
     start_at, end_at = compute_window(
         target_date=effective_date,
@@ -545,13 +553,13 @@ def digest(target_date: date | None, top: int, dry_run: bool) -> None:
         start_at=start_at,
         end_at=end_at,
         window_id=window_id,
-        top_n=top,
+        top_n=top_limit,
     )
     messages = render_digest_html(digest_data)
 
     click.echo(
         f"Digest window: {start_at.isoformat()} -> {end_at.isoformat()} ({settings.timezone}) "
-        f"top={top} dry_run={dry_run}"
+        f"top={top_limit} dry_run={dry_run}"
     )
     if window_id is None:
         click.echo("Window not found in DB; using fallback Top list (content_hash dedup).")
@@ -597,7 +605,7 @@ def publish(target_date: date | None, force: bool) -> None:
         start_at=start_at,
         end_at=end_at,
         window_id=window.id,
-        top_n=10,
+        top_n=settings.top_k_global,
     )
     messages = render_digest_html(digest_data)
     if not messages:

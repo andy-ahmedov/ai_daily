@@ -47,54 +47,58 @@ def _append_block(messages: list[str], current: str, block: str) -> str:
     return current
 
 
-def _format_tags(tags: list[str]) -> str:
-    if not tags:
-        return "News"
-    return tags[0]
-
-
-def _render_top_cluster(rank: int, cluster: DigestTopCluster) -> str:
-    tag = escape(_format_tags(cluster.tags))
-    title = escape(cluster.title)
-    lines = [f"{rank}) <b>[{tag}]</b> {title}"]
-    if cluster.why:
-        lines.append(f"   — {escape(cluster.why)}")
-    if cluster.sources:
-        lines.append(f"   Источники: {', '.join(escape(source) for source in cluster.sources)}")
-    return "\n".join(lines)
-
-
-def _render_post(post: DigestPostItem, tz: ZoneInfo) -> str:
-    posted_time = post.posted_at.astimezone(tz).strftime("%H:%M")
-    tag = escape(_format_tags(post.tags))
-    key_point = escape(post.key_point)
-    line = f"• <b>{posted_time}</b> [{tag}][⭐{post.importance}] {key_point}"
-    if post.permalink:
-        line += f' <a href="{escape(post.permalink, quote=True)}">🔗</a>'
-    if post.why_it_matters:
-        line += f"\n  — {escape(post.why_it_matters)}"
+def _render_signal_line(
+    *,
+    posted_at,
+    category: str,
+    importance: int,
+    why_it_matters: str,
+    permalink: str | None,
+    tz: ZoneInfo,
+) -> str:
+    posted_time = posted_at.astimezone(tz).strftime("%H:%M")
+    line = (
+        f"• <b>{escape(posted_time)}</b> "
+        f"[{escape(category)}][⭐{importance}] {escape(_truncate(why_it_matters, 220))}"
+    )
+    if permalink:
+        line += f' <a href="{escape(permalink, quote=True)}">🔗</a>'
     return line
 
 
-def _render_channel_section(section: DigestChannelSection, tz: ZoneInfo) -> list[str]:
-    blocks: list[str] = []
-    blocks.append(f"<b>{escape(section.channel_name)}</b> — {section.posts_count} постов")
+def _render_top_cluster(cluster: DigestTopCluster, tz: ZoneInfo) -> str:
+    return _render_signal_line(
+        posted_at=cluster.posted_at,
+        category=cluster.category,
+        importance=cluster.importance,
+        why_it_matters=cluster.why_it_matters,
+        permalink=cluster.permalink,
+        tz=tz,
+    )
 
-    summary_lines = ["<i>Сводка:</i>"]
-    if section.channel_summary:
-        for bullet in section.channel_summary:
-            summary_lines.append(f"• {escape(bullet)}")
-    else:
-        summary_lines.append("• Нет постов за окно")
-    blocks.append("\n".join(summary_lines))
 
-    posts_lines = ["<i>Посты:</i>"]
+def _render_post(post: DigestPostItem, tz: ZoneInfo) -> str:
+    return _render_signal_line(
+        posted_at=post.posted_at,
+        category=post.category,
+        importance=post.importance,
+        why_it_matters=post.why_it_matters,
+        permalink=post.permalink,
+        tz=tz,
+    )
+
+
+def _render_channel_section(section: DigestChannelSection, tz: ZoneInfo) -> str:
+    lines: list[str] = [
+        f"<b>{escape(section.channel_name)}</b> — показано {section.posts_count} из {section.total_posts}",
+    ]
     if section.posts:
-        posts_lines.extend(_render_post(post, tz) for post in section.posts)
+        lines.extend(_render_post(post, tz) for post in section.posts)
     else:
-        posts_lines.append("• Нет постов за окно")
-    blocks.append("\n".join(posts_lines))
-    return blocks
+        lines.append("Нет полезных постов по критериям за окно.")
+    if section.hidden_posts > 0:
+        lines.append(f"<i>Hidden: {section.hidden_posts} low-value posts</i>")
+    return "\n".join(lines)
 
 
 def render_digest_html(digest_data: DigestData) -> list[str]:
@@ -104,21 +108,20 @@ def render_digest_html(digest_data: DigestData) -> list[str]:
     title = (
         f"<b>AI Digest</b> — {escape(digest_data.header.digest_date)}\n"
         f"<i>Окно: {escape(start)} → {escape(end)} ({escape(digest_data.header.timezone)})</i>\n\n"
-        f"<b>Top-{digest_data.top_limit} дня (без дублей)</b>"
+        f"<b>Global Top-{digest_data.top_limit}</b>"
     )
 
     messages: list[str] = []
     current = title
 
     if not digest_data.top_clusters:
-        current = _append_block(messages, current, "— Нет данных для Top дня")
+        current = _append_block(messages, current, "— Нет полезных постов для Global Top.")
     else:
-        for idx, cluster in enumerate(digest_data.top_clusters, start=1):
-            current = _append_block(messages, current, _render_top_cluster(idx, cluster))
+        global_block = "\n".join(_render_top_cluster(cluster, tz) for cluster in digest_data.top_clusters)
+        current = _append_block(messages, current, global_block)
 
     for section in digest_data.per_channel:
-        for block in _render_channel_section(section, tz):
-            current = _append_block(messages, current, block)
+        current = _append_block(messages, current, _render_channel_section(section, tz))
 
     if current:
         messages.append(current)

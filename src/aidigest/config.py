@@ -33,6 +33,10 @@ class Settings(BaseSettings):
 
     embed_dim: int = Field(default=256, alias="EMBED_DIM")
     dedup_threshold: float = Field(default=0.88, alias="DEDUP_THRESHOLD")
+    top_k_per_channel: int = Field(default=5, alias="TOP_K_PER_CHANNEL")
+    min_importance_channel: int = Field(default=3, alias="MIN_IMPORTANCE_CHANNEL")
+    top_k_global: int = Field(default=10, alias="TOP_K_GLOBAL")
+    min_importance_global: int = Field(default=4, alias="MIN_IMPORTANCE_GLOBAL")
 
     @field_validator("run_at_hour", "window_start_hour", "window_end_hour")
     @classmethod
@@ -53,6 +57,20 @@ class Settings(BaseSettings):
     def validate_embed_dim(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("embed_dim must be greater than 0")
+        return value
+
+    @field_validator("top_k_per_channel", "top_k_global")
+    @classmethod
+    def validate_top_k(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("top_k must be greater than 0")
+        return value
+
+    @field_validator("min_importance_channel", "min_importance_global")
+    @classmethod
+    def validate_importance_thresholds(cls, value: int) -> int:
+        if not 1 <= value <= 5:
+            raise ValueError("importance threshold must be in range 1..5")
         return value
 
     @field_validator("allowed_user_ids", mode="before")

@@ -239,7 +239,12 @@ def publish_window(
         return 0
 
     started_at = time.monotonic()
-    digest_data = build_digest_data(start_at=start_at, end_at=end_at, window_id=window_id, top_n=10)
+    digest_data = build_digest_data(
+        start_at=start_at,
+        end_at=end_at,
+        window_id=window_id,
+        top_n=settings.top_k_global,
+    )
     messages = render_digest_html(digest_data)
     if not messages:
         raise RuntimeError("digest rendering produced no messages")

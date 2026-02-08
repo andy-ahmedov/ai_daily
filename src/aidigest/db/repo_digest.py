@@ -23,6 +23,7 @@ class DigestPostRecord:
     why_it_matters: str | None
     tags: list[str] | None
     importance: int | None
+    category: str | None
 
 
 @dataclass(slots=True)
@@ -41,6 +42,7 @@ class DigestClusterRecord:
     why_it_matters: str | None
     tags: list[str] | None
     importance: int | None
+    category: str | None
 
 
 def get_window_by_range(start_at: datetime, end_at: datetime) -> Window | None:
@@ -75,6 +77,7 @@ def get_posts_for_digest(start_at: datetime, end_at: datetime) -> list[DigestPos
                 PostSummary.why_it_matters.label("why_it_matters"),
                 PostSummary.tags.label("tags"),
                 PostSummary.importance.label("importance"),
+                PostSummary.category.label("category"),
             )
             .join(Channel, Channel.id == Post.channel_id)
             .outerjoin(PostSummary, PostSummary.post_id == Post.id)
@@ -100,6 +103,7 @@ def get_posts_for_digest(start_at: datetime, end_at: datetime) -> list[DigestPos
             why_it_matters=row.why_it_matters,
             tags=list(row.tags) if row.tags is not None else None,
             importance=int(row.importance) if row.importance is not None else None,
+            category=str(row.category) if row.category is not None else None,
         )
         for row in rows
     ]
@@ -123,6 +127,7 @@ def get_cluster_records(window_id: int) -> list[DigestClusterRecord]:
                 PostSummary.why_it_matters.label("why_it_matters"),
                 PostSummary.tags.label("tags"),
                 PostSummary.importance.label("importance"),
+                PostSummary.category.label("category"),
             )
             .join(DedupClusterPost, DedupClusterPost.cluster_id == DedupCluster.id)
             .join(Post, Post.id == DedupClusterPost.post_id)
@@ -150,6 +155,7 @@ def get_cluster_records(window_id: int) -> list[DigestClusterRecord]:
             why_it_matters=row.why_it_matters,
             tags=list(row.tags) if row.tags is not None else None,
             importance=int(row.importance) if row.importance is not None else None,
+            category=str(row.category) if row.category is not None else None,
         )
         for row in rows
     ]
