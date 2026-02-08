@@ -15,6 +15,7 @@ class SummarySnapshot:
     why_it_matters: str | None
     tags: list[str]
     importance: int
+    category: str = "OTHER_USEFUL"
 
 
 @dataclass(slots=True)
@@ -33,6 +34,7 @@ def find_existing_summary_by_hash(content_hash: str) -> tuple[int, SummarySnapsh
                 PostSummary.why_it_matters,
                 PostSummary.tags,
                 PostSummary.importance,
+                PostSummary.category,
             )
             .join(Post, Post.id == PostSummary.post_id)
             .where(Post.content_hash == content_hash)
@@ -50,6 +52,7 @@ def find_existing_summary_by_hash(content_hash: str) -> tuple[int, SummarySnapsh
                 why_it_matters=row.why_it_matters,
                 tags=list(row.tags or []),
                 importance=int(row.importance),
+                category=str(row.category or "OTHER_USEFUL"),
             ),
         )
 

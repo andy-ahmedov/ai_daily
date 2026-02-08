@@ -26,6 +26,7 @@ def upsert_summary(
     why_it_matters: str | None,
     tags: list[str],
     importance: int,
+    category: str,
 ) -> PostSummary:
     stmt = (
         pg_insert(PostSummary)
@@ -35,6 +36,7 @@ def upsert_summary(
             why_it_matters=why_it_matters,
             tags=tags,
             importance=importance,
+            category=category,
         )
         .on_conflict_do_update(
             index_elements=[PostSummary.post_id],
@@ -43,6 +45,7 @@ def upsert_summary(
                 "why_it_matters": why_it_matters,
                 "tags": tags,
                 "importance": importance,
+                "category": category,
             },
         )
     )

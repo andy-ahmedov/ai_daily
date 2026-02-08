@@ -86,6 +86,9 @@ class PostSummary(Base):
     importance: Mapped[int] = mapped_column(
         SmallInteger, server_default=sa.text("3"), nullable=False
     )
+    category: Mapped[str] = mapped_column(
+        Text, server_default=sa.text("'OTHER_USEFUL'"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
     )
