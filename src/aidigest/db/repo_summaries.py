@@ -75,6 +75,29 @@ def get_posts_in_window(start_at: datetime, end_at: datetime, limit: int) -> lis
         return posts
 
 
+def get_posts_by_ids(post_ids: list[int]) -> list[Post]:
+    ids = [int(post_id) for post_id in post_ids]
+    if not ids:
+        return []
+
+    order = {post_id: idx for idx, post_id in enumerate(ids)}
+    with get_session() as session:
+        rows = session.execute(
+            select(Post, Channel.title.label("channel_title"))
+            .join(Channel, Channel.id == Post.channel_id)
+            .where(Post.id.in_(ids))
+        ).all()
+
+        posts: list[Post] = []
+        for row in rows:
+            post = row[0]
+            setattr(post, "channel_title", row.channel_title)
+            posts.append(post)
+
+    posts.sort(key=lambda post: order.get(int(post.id), len(order)))
+    return posts
+
+
 def get_missing_posts_in_window(start_at: datetime, end_at: datetime, limit: int) -> list[Post]:
     with get_session() as session:
         rows = session.execute(

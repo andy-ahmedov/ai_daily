@@ -109,6 +109,59 @@ def get_posts_for_digest(start_at: datetime, end_at: datetime) -> list[DigestPos
     ]
 
 
+def get_channel_posts_for_digest(
+    *,
+    channel_id: int,
+    start_at: datetime,
+    end_at: datetime,
+) -> list[DigestPostRecord]:
+    with get_session() as session:
+        rows = session.execute(
+            select(
+                Post.id.label("post_id"),
+                Post.channel_id.label("channel_id"),
+                Channel.title.label("channel_title"),
+                Channel.username.label("channel_username"),
+                Post.posted_at.label("posted_at"),
+                Post.text.label("text"),
+                Post.permalink.label("permalink"),
+                Post.content_hash.label("content_hash"),
+                PostSummary.key_point.label("key_point"),
+                PostSummary.why_it_matters.label("why_it_matters"),
+                PostSummary.tags.label("tags"),
+                PostSummary.importance.label("importance"),
+                PostSummary.category.label("category"),
+            )
+            .join(Channel, Channel.id == Post.channel_id)
+            .outerjoin(PostSummary, PostSummary.post_id == Post.id)
+            .where(
+                Post.channel_id == channel_id,
+                Post.posted_at >= start_at,
+                Post.posted_at < end_at,
+            )
+            .order_by(Post.posted_at.desc(), Post.id.desc())
+        ).all()
+
+    return [
+        DigestPostRecord(
+            post_id=int(row.post_id),
+            channel_id=int(row.channel_id),
+            channel_title=row.channel_title,
+            channel_username=row.channel_username,
+            posted_at=row.posted_at,
+            text=row.text,
+            permalink=row.permalink,
+            content_hash=row.content_hash,
+            key_point=row.key_point,
+            why_it_matters=row.why_it_matters,
+            tags=list(row.tags) if row.tags is not None else None,
+            importance=int(row.importance) if row.importance is not None else None,
+            category=str(row.category) if row.category is not None else None,
+        )
+        for row in rows
+    ]
+
+
 def get_cluster_records(window_id: int) -> list[DigestClusterRecord]:
     with get_session() as session:
         rows = session.execute(

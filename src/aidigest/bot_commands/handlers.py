@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime
+from html import escape
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -22,6 +24,7 @@ from aidigest.db.repo_channels import (
     upsert_channel,
 )
 from aidigest.db.repo_dedup_clusters import get_or_create_window
+from aidigest.db.repo_digest import DigestPostRecord, get_channel_posts_for_digest
 from aidigest.db.repo_digests import get_digest_by_window
 from aidigest.db.repo_stats import (
     count_channels,
@@ -33,11 +36,15 @@ from aidigest.db.repo_stats import (
     get_window_by_range,
 )
 from aidigest.ingest.window import compute_window
+from aidigest.nlp.summarize import summarize_post_ids
 from aidigest.scheduler.jobs import run_daily_pipeline
 from aidigest.telegram.user_client import UserTelegramClient
 
 router = Router()
 _digest_now_task: asyncio.Task[None] | None = None
+_CHANNEL_TOP_RE = re.compile(r"^(?P<ref>\S+)\s+top-(?P<top>\d+)$", re.IGNORECASE)
+_TELEGRAM_MAX_MESSAGE_LEN = 3900
+_CHANNEL_SUMMARY_BUFFER = 2
 
 
 async def _ensure_allowed(message: Message, allow_bootstrap: bool = False) -> bool:
@@ -84,6 +91,102 @@ def _current_window(settings: Any) -> tuple[Any, Any, Any]:
     return effective_date, start_at, end_at
 
 
+def _parse_channel_command_args(raw_args: str | None) -> tuple[str, int] | None:
+    if not raw_args:
+        return None
+    match = _CHANNEL_TOP_RE.match(raw_args.strip())
+    if match is None:
+        return None
+
+    ref = match.group("ref").strip()
+    top_n = int(match.group("top"))
+    if not ref or top_n <= 0:
+        return None
+    return ref, top_n
+
+
+def _normalize_category(category: str | None) -> str:
+    normalized = str(category or "OTHER_USEFUL").strip().upper()
+    if not normalized:
+        return "OTHER_USEFUL"
+    return normalized
+
+
+def _render_why(record: DigestPostRecord) -> str:
+    value = (record.why_it_matters or "").strip()
+    if value:
+        return value
+    key_point = (record.key_point or "").strip()
+    if key_point:
+        return key_point
+    return "Откройте пост, чтобы оценить его полезность."
+
+
+def _is_summary_missing(record: DigestPostRecord) -> bool:
+    return (
+        record.key_point is None
+        or record.importance is None
+        or record.category is None
+        or not (record.why_it_matters or "").strip()
+    )
+
+
+def _select_channel_useful_posts(
+    *,
+    posts: list[DigestPostRecord],
+    min_importance: int,
+    top_n: int,
+) -> list[DigestPostRecord]:
+    ranked = sorted(
+        [
+            item
+            for item in posts
+            if int(item.importance or 0) >= min_importance
+            and _normalize_category(item.category) != "NOISE"
+        ],
+        key=lambda item: (int(item.importance or 0), item.posted_at),
+        reverse=True,
+    )
+    return ranked[:top_n]
+
+
+def _render_channel_top_line(*, record: DigestPostRecord, tz: ZoneInfo) -> str:
+    posted_time = record.posted_at.astimezone(tz).strftime("%H:%M")
+    category = _normalize_category(record.category)
+    importance = int(record.importance or 0)
+    why = escape(_render_why(record))
+    line = f"• {escape(posted_time)} [{escape(category)}][⭐{importance}] {why}"
+    if record.permalink:
+        line += f' <a href="{escape(record.permalink, quote=True)}">🔗</a>'
+    else:
+        line += " 🔗"
+    return line
+
+
+def _split_lines_for_telegram(lines: list[str], limit: int = _TELEGRAM_MAX_MESSAGE_LEN) -> list[str]:
+    if not lines:
+        return []
+
+    chunks: list[str] = []
+    current = ""
+    for line in lines:
+        candidate = line if not current else f"{current}\n{line}"
+        if len(candidate) <= limit:
+            current = candidate
+            continue
+
+        if current:
+            chunks.append(current)
+        current = line
+        while len(current) > limit:
+            chunks.append(current[:limit])
+            current = current[limit:]
+
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 @router.message(Command("start"))
 async def cmd_start(message: Message) -> None:
     if not await _ensure_allowed(message, allow_bootstrap=True):
@@ -104,6 +207,7 @@ async def cmd_start(message: Message) -> None:
         "/list_all",
         "/status",
         "/digest-now",
+        "/channel <ref> top-N",
     ]
     if lines:
         text_lines.append("")
@@ -287,6 +391,92 @@ async def cmd_status(message: Message) -> None:
         f"DIGEST_CHANNEL_ID: {settings.digest_channel_id or 'not set'}",
     ]
     await message.answer("\n".join(lines))
+
+
+@router.message(Command("channel"))
+async def cmd_channel(
+    message: Message,
+    command: CommandObject,
+    tg_client: UserTelegramClient,
+) -> None:
+    if not await _ensure_allowed(message):
+        return
+    if str(message.chat.type).lower() != "private":
+        await message.answer("Команда доступна только в личном чате с ботом.")
+        return
+
+    parsed = _parse_channel_command_args(command.args)
+    if parsed is None:
+        await message.answer("Usage: /channel <ref> top-<N>")
+        return
+    ref, top_n = parsed
+
+    settings = get_settings()
+    _, start_at, end_at = _current_window(settings)
+
+    channel = None
+    raw_ref = ref.strip()
+    if raw_ref.isdigit():
+        channel = get_channel_by_peer_id(int(raw_ref))
+    else:
+        channel = get_channel_by_username(raw_ref.lstrip("@"))
+
+    if channel is None:
+        try:
+            info = await tg_client.get_channel_info(raw_ref)
+            channel = get_channel_by_peer_id(int(info["tg_peer_id"]))
+        except Exception as exc:
+            logger.warning("channel command failed to resolve ref='{}': {}", raw_ref, exc)
+
+    if channel is None:
+        await message.answer("Канал не найден в базе. Добавьте его через /add <ref>.")
+        return
+
+    posts = get_channel_posts_for_digest(
+        channel_id=int(channel.id),
+        start_at=start_at,
+        end_at=end_at,
+    )
+
+    useful_posts = _select_channel_useful_posts(
+        posts=posts,
+        min_importance=settings.min_importance_channel,
+        top_n=top_n,
+    )
+    missing = [post for post in posts if _is_summary_missing(post)]
+    if len(useful_posts) < top_n and missing:
+        need = max(0, top_n - len(useful_posts))
+        summarize_limit = min(len(missing), need + _CHANNEL_SUMMARY_BUFFER)
+        to_summarize = [post.post_id for post in missing[:summarize_limit]]
+        if to_summarize:
+            stats = summarize_post_ids(post_ids=to_summarize, dry_run=False)
+            logger.info(
+                "channel command summarized channel_id={} candidates={} summarized={} copied={} errors={}",
+                channel.id,
+                len(to_summarize),
+                stats.summarized,
+                stats.copied_exact_dup,
+                stats.errors,
+            )
+            posts = get_channel_posts_for_digest(
+                channel_id=int(channel.id),
+                start_at=start_at,
+                end_at=end_at,
+            )
+            useful_posts = _select_channel_useful_posts(
+                posts=posts,
+                min_importance=settings.min_importance_channel,
+                top_n=top_n,
+            )
+
+    if not useful_posts:
+        await message.answer("Нет полезных постов по критериям за окно.")
+        return
+
+    timezone = ZoneInfo(settings.timezone)
+    lines = [_render_channel_top_line(record=post, tz=timezone) for post in useful_posts]
+    for chunk in _split_lines_for_telegram(lines):
+        await message.answer(chunk, parse_mode="HTML", disable_web_page_preview=True)
 
 
 @router.message(Command("digest-now"))

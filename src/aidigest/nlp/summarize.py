@@ -13,7 +13,12 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from aidigest.db.models import Post, PostSummary
 from aidigest.db.repo_dedup import SummarySnapshot, find_existing_summary_by_hash
-from aidigest.db.repo_summaries import get_posts_in_window, has_summary, upsert_summary
+from aidigest.db.repo_summaries import (
+    get_posts_by_ids,
+    get_posts_in_window,
+    has_summary,
+    upsert_summary,
+)
 from aidigest.db.session import get_session
 from aidigest.nlp.prompts import ALLOWED_TAGS, CATEGORIES, SYSTEM_PROMPT, build_post_prompt
 
@@ -313,10 +318,19 @@ def summarize_window(
     limit: int,
     dry_run: bool,
 ) -> SummarizeStats:
+    posts = get_posts_in_window(start_at=start_at, end_at=end_at, limit=limit)
+    return _summarize_posts(posts=posts, dry_run=dry_run)
+
+
+def summarize_post_ids(*, post_ids: list[int], dry_run: bool = False) -> SummarizeStats:
+    posts = get_posts_by_ids(post_ids)
+    return _summarize_posts(posts=posts, dry_run=dry_run)
+
+
+def _summarize_posts(*, posts: list[Post], dry_run: bool) -> SummarizeStats:
     from aidigest.config import get_settings
     from aidigest.nlp.yandex_llm import chat_json, make_client
 
-    posts = get_posts_in_window(start_at=start_at, end_at=end_at, limit=limit)
     stats = SummarizeStats(total_candidates=len(posts))
     if not posts:
         return stats
