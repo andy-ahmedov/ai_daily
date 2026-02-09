@@ -48,6 +48,58 @@ alembic revision --autogenerate -m "describe change"
 aidigest doctor
 ```
 
+## Пошаговый запуск: от активации venv до публикации
+
+Ниже минимальный рабочий сценарий, который можно копировать и выполнять по порядку.
+
+```bash
+# Активирует локальное виртуальное окружение проекта (.venv),
+# чтобы использовать правильные версии Python-пакетов.
+source .venv/bin/activate
+
+# Обновляет pip до актуальной версии, чтобы избежать проблем с установкой зависимостей.
+pip install -U pip
+
+# Ставит проект в editable-режиме вместе с dev-зависимостями.
+# После этого команда aidigest доступна в текущем окружении.
+pip install -e ".[dev]"
+
+# Поднимает локальную БД (PostgreSQL + pgvector) в фоне через Docker Compose.
+docker compose up -d
+
+# Создает локальный .env из шаблона (если еще не создан).
+cp .env.example .env
+
+# Применяет все миграции БД до последней версии схемы.
+alembic upgrade head
+
+# Проверяет конфиг, доступ к БД и базовую готовность сервиса к запуску.
+aidigest doctor
+
+# Проверяет Telethon-сессию пользователя Telegram.
+# При первом запуске может попросить код подтверждения.
+aidigest tg:whoami
+
+# Запускает сбор постов за окно "вчера 13:00 -> сегодня 13:00" (Europe/Riga).
+aidigest ingest
+
+# Генерирует summary для новых/нужных постов.
+aidigest summarize --limit 100
+
+# Строит эмбеддинги для постов без embedding.
+aidigest embed --limit 200
+
+# Выполняет семантическую дедупликацию за текущее окно.
+aidigest dedup
+
+# Публикует собранный дайджест в Telegram-канал (BOT_TOKEN + DIGEST_CHANNEL_ID).
+aidigest publish
+```
+
+Критично для первого запуска:
+- Перед `aidigest tg:whoami` заполнить в `.env`: `TG_API_ID` и `TG_API_HASH`.
+- Перед `aidigest publish` заполнить в `.env`: `BOT_TOKEN` и `DIGEST_CHANNEL_ID`.
+
 ## Telethon login
 
 1) Заполнить `TG_API_ID` и `TG_API_HASH` в `.env`.
