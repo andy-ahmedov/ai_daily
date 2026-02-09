@@ -4,9 +4,11 @@ import asyncio
 
 from aiogram import Bot, Dispatcher
 from loguru import logger
+from sqlalchemy import text
 
 from aidigest.bot_commands.handlers import router
 from aidigest.config import get_settings
+from aidigest.db.engine import get_engine
 from aidigest.telegram.user_client import UserTelegramClient
 
 
@@ -35,6 +37,14 @@ async def run_bot() -> None:
     settings = get_settings()
     if not settings.bot_token:
         raise RuntimeError("Missing BOT_TOKEN. Fill it in .env.")
+    try:
+        with get_engine().connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise RuntimeError(
+            "Database is unavailable. Start PostgreSQL (`docker compose up -d postgres`) "
+            "and apply migrations (`alembic upgrade head`)."
+        ) from exc
 
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher()

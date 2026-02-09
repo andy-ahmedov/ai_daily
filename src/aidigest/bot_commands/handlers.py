@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import re
+import time
 from datetime import datetime
 from html import escape
 from typing import Any
@@ -12,6 +14,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 from loguru import logger
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from aidigest.bot_commands.auth import is_user_allowed
 from aidigest.config import get_settings
@@ -37,6 +40,7 @@ from aidigest.db.repo_stats import (
 )
 from aidigest.ingest.window import compute_window
 from aidigest.nlp.summarize import summarize_post_ids
+from aidigest.nlp.yandex_llm import chat_json, make_client
 from aidigest.scheduler.jobs import run_daily_pipeline
 from aidigest.telegram.user_client import UserTelegramClient
 
@@ -45,6 +49,14 @@ _digest_now_task: asyncio.Task[None] | None = None
 _CHANNEL_TOP_RE = re.compile(r"^(?P<ref>\S+)\s+top-(?P<top>\d+)$", re.IGNORECASE)
 _TELEGRAM_MAX_MESSAGE_LEN = 3900
 _CHANNEL_SUMMARY_BUFFER = 2
+_LONG_POST_WORDS_THRESHOLD = 120
+_LONG_DESCRIPTION_MIN_WORDS = 40
+_LONG_DESCRIPTION_MAX_WORDS = 60
+_LLM_INPUT_CHAR_LIMIT = 2500
+_WORD_RE = re.compile(r"\b\w+\b", re.UNICODE)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+")
+_URL_RE = re.compile(r"https?://\S+")
+_WHITESPACE_RE = re.compile(r"\s+")
 
 
 async def _ensure_allowed(message: Message, allow_bootstrap: bool = False) -> bool:
@@ -122,6 +134,143 @@ def _render_why(record: DigestPostRecord) -> str:
     return "Откройте пост, чтобы оценить его полезность."
 
 
+def _word_count(text: str) -> int:
+    return len(_WORD_RE.findall(text))
+
+
+def _normalize_text_block(text: str) -> str:
+    value = _URL_RE.sub("", text or "")
+    value = _WHITESPACE_RE.sub(" ", value).strip()
+    return value
+
+
+def _truncate_words(text: str, limit: int) -> str:
+    words = text.split()
+    if len(words) <= limit:
+        return text.strip()
+    return " ".join(words[:limit]).strip()
+
+
+def _to_sentences(text: str) -> list[str]:
+    return [item.strip() for item in _SENTENCE_SPLIT_RE.split(text) if item.strip()]
+
+
+def _build_channel_description(record: DigestPostRecord) -> str:
+    why = _normalize_text_block(_render_why(record))
+    key_point = _normalize_text_block(record.key_point or "")
+    source_text = _normalize_text_block(record.text or "")
+    if _word_count(source_text) < _LONG_POST_WORDS_THRESHOLD:
+        return why
+
+    parts: list[str] = []
+    if why:
+        parts.append(why)
+    if key_point and key_point.lower() not in why.lower():
+        key_sentence = key_point if key_point.endswith((".", "!", "?", "…")) else f"{key_point}."
+        parts.append(key_sentence)
+
+    # For long posts, add 1-2 concise source sentences so response has enough context.
+    for sentence in _to_sentences(source_text):
+        if not sentence:
+            continue
+        sentence_norm = sentence.lower()
+        if any(sentence_norm in existing.lower() for existing in parts):
+            continue
+        parts.append(sentence)
+        if _word_count(" ".join(parts)) >= _LONG_DESCRIPTION_MIN_WORDS:
+            break
+        if len(parts) >= 3:
+            break
+
+    combined = _normalize_text_block(" ".join(parts))
+    if not combined:
+        return _render_why(record)
+
+    if _word_count(combined) < _LONG_DESCRIPTION_MIN_WORDS and source_text:
+        need = _LONG_DESCRIPTION_MIN_WORDS - _word_count(combined)
+        extra = _truncate_words(source_text, need + 8)
+        combined = _normalize_text_block(f"{combined} {extra}")
+
+    if _word_count(combined) > _LONG_DESCRIPTION_MAX_WORDS:
+        combined = _truncate_words(combined, _LONG_DESCRIPTION_MAX_WORDS)
+
+    return combined
+
+
+def _normalize_llm_description(raw: str) -> str:
+    cleaned = _normalize_text_block(raw)
+    if not cleaned:
+        return ""
+    if _word_count(cleaned) > _LONG_DESCRIPTION_MAX_WORDS:
+        cleaned = _truncate_words(cleaned, _LONG_DESCRIPTION_MAX_WORDS)
+    return cleaned
+
+
+def _build_long_description_prompt(record: DigestPostRecord) -> str:
+    source_text = _normalize_text_block(record.text or "")
+    if len(source_text) > _LLM_INPUT_CHAR_LIMIT:
+        source_text = source_text[:_LLM_INPUT_CHAR_LIMIT].strip()
+    return (
+        "Сформулируй короткое описание Telegram-поста на русском.\n"
+        "Верни JSON с ключом description.\n"
+        "Требования:\n"
+        f"- для длинного поста сделай { _LONG_DESCRIPTION_MIN_WORDS }-{ _LONG_DESCRIPTION_MAX_WORDS } слов;\n"
+        "- можно 2-3 коротких предложения;\n"
+        "- без цитат и без копирования длинных фрагментов текста поста;\n"
+        "- сфокусируйся на практической пользе и причине открыть пост.\n"
+        "Данные:\n"
+        f"- category: {_normalize_category(record.category)}\n"
+        f"- importance: {int(record.importance or 0)}\n"
+        f"- why_it_matters: {_render_why(record)}\n"
+        f"- key_point: {record.key_point or ''}\n"
+        f"- post_text: {source_text}\n"
+    )
+
+
+def _build_channel_descriptions_with_llm(
+    records: list[DigestPostRecord],
+    settings: Any,
+) -> dict[int, str]:
+    if not records:
+        return {}
+    if not settings.yandex_api_key or not settings.yandex_folder_id or not settings.yandex_model_uri:
+        return {}
+
+    try:
+        client = make_client(settings)
+    except Exception as exc:
+        logger.warning("channel command: failed to init LLM client: {}", exc)
+        return {}
+
+    result: dict[int, str] = {}
+    for record in records:
+        source_text = _normalize_text_block(record.text or "")
+        if _word_count(source_text) < _LONG_POST_WORDS_THRESHOLD:
+            continue
+
+        try:
+            payload = chat_json(
+                client=client,
+                model_uri=settings.yandex_model_uri,
+                messages=[
+                    {"role": "system", "content": "Return valid JSON only."},
+                    {"role": "user", "content": _build_long_description_prompt(record)},
+                ],
+                post_id=record.post_id,
+            )
+            candidate = _normalize_llm_description(str(payload.get("description", "")))
+            if _word_count(candidate) < _LONG_DESCRIPTION_MIN_WORDS:
+                candidate = _build_channel_description(record)
+            if _word_count(candidate) > _LONG_DESCRIPTION_MAX_WORDS:
+                candidate = _truncate_words(candidate, _LONG_DESCRIPTION_MAX_WORDS)
+            result[record.post_id] = candidate
+        except Exception as exc:
+            logger.warning("channel command: LLM long description failed post_id={} error={}", record.post_id, exc)
+        finally:
+            time.sleep(random.uniform(0.15, 0.35))
+    return result
+
+
 def _is_summary_missing(record: DigestPostRecord) -> bool:
     return (
         record.key_point is None
@@ -150,16 +299,19 @@ def _select_channel_useful_posts(
     return ranked[:top_n]
 
 
-def _render_channel_top_line(*, record: DigestPostRecord, tz: ZoneInfo) -> str:
-    posted_time = record.posted_at.astimezone(tz).strftime("%H:%M")
+def _render_channel_top_line(
+    *,
+    record: DigestPostRecord,
+    tz: ZoneInfo,
+    description: str | None = None,
+) -> str:
+    posted_time = record.posted_at.astimezone(tz).strftime("%Y-%m-%d %H:%M")
     category = _normalize_category(record.category)
     importance = int(record.importance or 0)
-    why = escape(_render_why(record))
+    why = escape(description or _build_channel_description(record))
     line = f"• {escape(posted_time)} [{escape(category)}][⭐{importance}] {why}"
     if record.permalink:
-        line += f' <a href="{escape(record.permalink, quote=True)}">🔗</a>'
-    else:
-        line += " 🔗"
+        line += f' <a href="{escape(record.permalink, quote=True)}">ссылка</a>'
     return line
 
 
@@ -242,6 +394,13 @@ async def cmd_add(
             title=info["title"],
             is_active=True,
         )
+    except OperationalError as exc:
+        logger.warning("Add failed: {}", exc)
+        await message.answer(
+            "Error: database is unavailable. Start PostgreSQL "
+            "(`docker compose up -d postgres`) and retry."
+        )
+        return
     except Exception as exc:
         logger.warning("Add failed: {}", exc)
         await message.answer(f"Error: {exc}")
@@ -473,8 +632,20 @@ async def cmd_channel(
         await message.answer("Нет полезных постов по критериям за окно.")
         return
 
+    expanded_descriptions = await asyncio.to_thread(
+        _build_channel_descriptions_with_llm,
+        useful_posts,
+        settings,
+    )
     timezone = ZoneInfo(settings.timezone)
-    lines = [_render_channel_top_line(record=post, tz=timezone) for post in useful_posts]
+    lines = [
+        _render_channel_top_line(
+            record=post,
+            tz=timezone,
+            description=expanded_descriptions.get(post.post_id),
+        )
+        for post in useful_posts
+    ]
     for chunk in _split_lines_for_telegram(lines):
         await message.answer(chunk, parse_mode="HTML", disable_web_page_preview=True)
 
