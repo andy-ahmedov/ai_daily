@@ -7,10 +7,12 @@ from zoneinfo import ZoneInfo
 from aidigest.bot_commands.handlers import (
     _build_channel_description,
     _build_channel_descriptions_with_llm,
+    _main_menu_keyboard,
     _parse_channel_command_args,
     _render_channel_top_line,
     _select_channel_useful_posts,
     _split_lines_for_telegram,
+    get_bot_commands,
 )
 from aidigest.db.repo_digest import DigestPostRecord
 
@@ -149,3 +151,32 @@ def test_build_channel_descriptions_with_llm_truncates_to_max(monkeypatch) -> No
     assert record.post_id in result
     words = len(result[record.post_id].split())
     assert words <= 60
+
+
+def test_get_bot_commands_contains_core_entries() -> None:
+    commands = get_bot_commands()
+    command_names = [item.command for item in commands]
+
+    assert "start" in command_names
+    assert "help" in command_names
+    assert "add" in command_names
+    assert "remove" in command_names
+    assert "list" in command_names
+    assert "list_all" in command_names
+    assert "status" in command_names
+    assert "digest-now" in command_names
+    assert "channel" in command_names
+
+
+def test_main_menu_keyboard_contains_expected_buttons() -> None:
+    keyboard = _main_menu_keyboard()
+    button_texts = [button.text for row in keyboard.keyboard for button in row]
+
+    assert "/list" in button_texts
+    assert "/status" in button_texts
+    assert "/list_all" in button_texts
+    assert "/digest-now" in button_texts
+    assert "➕ Add channel" in button_texts
+    assert "/remove" in button_texts
+    assert "/channel" in button_texts
+    assert "/help" in button_texts

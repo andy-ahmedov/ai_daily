@@ -6,7 +6,7 @@ from aiogram import Bot, Dispatcher
 from loguru import logger
 from sqlalchemy import text
 
-from aidigest.bot_commands.handlers import router
+from aidigest.bot_commands.handlers import get_bot_commands, router
 from aidigest.config import get_settings
 from aidigest.db.engine import get_engine
 from aidigest.telegram.user_client import UserTelegramClient
@@ -23,9 +23,13 @@ def _make_client() -> UserTelegramClient:
     )
 
 
-async def _on_startup(dispatcher: Dispatcher, client: UserTelegramClient) -> None:
+async def _on_startup(dispatcher: Dispatcher, client: UserTelegramClient, bot: Bot) -> None:
     logger.info("Starting Telethon client for bot")
     await client.connect(allow_interactive_login=False)
+    try:
+        await bot.set_my_commands(get_bot_commands())
+    except Exception as exc:  # pragma: no cover - runtime network/telegram-specific failures
+        logger.warning("Failed to register bot command menu: {}", exc)
 
 
 async def _on_shutdown(dispatcher: Dispatcher, client: UserTelegramClient) -> None:
@@ -54,7 +58,7 @@ async def run_bot() -> None:
     dp.include_router(router)
 
     async def on_startup(dispatcher: Dispatcher) -> None:
-        await _on_startup(dispatcher, client)
+        await _on_startup(dispatcher, client, bot)
 
     async def on_shutdown(dispatcher: Dispatcher) -> None:
         await _on_shutdown(dispatcher, client)

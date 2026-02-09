@@ -9,9 +9,15 @@ from html import escape
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import (
+    BotCommand,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+)
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
@@ -46,6 +52,7 @@ from aidigest.telegram.user_client import UserTelegramClient
 
 router = Router()
 _digest_now_task: asyncio.Task[None] | None = None
+_pending_add_channel_users: set[int] = set()
 _CHANNEL_TOP_RE = re.compile(r"^(?P<ref>\S+)\s+top-(?P<top>\d+)$", re.IGNORECASE)
 _TELEGRAM_MAX_MESSAGE_LEN = 3900
 _CHANNEL_SUMMARY_BUFFER = 2
@@ -57,6 +64,62 @@ _WORD_RE = re.compile(r"\b\w+\b", re.UNICODE)
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+")
 _URL_RE = re.compile(r"https?://\S+")
 _WHITESPACE_RE = re.compile(r"\s+")
+_BOT_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("start", "Показать помощь и кнопки"),
+    ("help", "Показать помощь и клавиатуру"),
+    ("menu", "Показать клавиатуру с кнопками"),
+    ("hide", "Скрыть клавиатуру"),
+    ("add", "Добавить канал: /add <ref>"),
+    ("remove", "Отключить канал: /remove <ref_or_peer_id>"),
+    ("list", "Список активных каналов"),
+    ("list_all", "Список всех каналов"),
+    ("status", "Статус системы"),
+    ("digest-now", "Запустить pipeline сейчас"),
+    ("channel", "Top постов: /channel <ref> top-N"),
+)
+
+
+def get_bot_commands() -> list[BotCommand]:
+    return [BotCommand(command=name, description=description) for name, description in _BOT_COMMANDS]
+
+
+def _main_menu_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="/list"), KeyboardButton(text="/status")],
+            [KeyboardButton(text="/list_all"), KeyboardButton(text="/digest-now")],
+            [KeyboardButton(text="➕ Add channel"), KeyboardButton(text="/remove")],
+            [KeyboardButton(text="/channel"), KeyboardButton(text="/help")],
+        ],
+        resize_keyboard=True,
+        input_field_placeholder="Выберите команду или введите аргументы",
+    )
+
+
+async def _add_channel_by_ref(message: Message, tg_client: UserTelegramClient, ref: str) -> None:
+    try:
+        entity = await tg_client.ensure_join(ref)
+        info = tg_client._entity_info(entity)
+        channel = upsert_channel(
+            tg_peer_id=info["tg_peer_id"],
+            username=info["username"],
+            title=info["title"],
+            is_active=True,
+        )
+    except OperationalError as exc:
+        logger.warning("Add failed: {}", exc)
+        await message.answer(
+            "Error: database is unavailable. Start PostgreSQL "
+            "(`docker compose up -d postgres`) and retry."
+        )
+        return
+    except Exception as exc:
+        logger.warning("Add failed: {}", exc)
+        await message.answer(f"Error: {exc}")
+        return
+
+    username = f"@{channel.username}" if channel.username else "—"
+    await message.answer(f"Added/Updated: {channel.title} ({username}) [{channel.tg_peer_id}]")
 
 
 async def _ensure_allowed(message: Message, allow_bootstrap: bool = False) -> bool:
@@ -360,6 +423,8 @@ async def cmd_start(message: Message) -> None:
         "/status",
         "/digest-now",
         "/channel <ref> top-N",
+        "",
+        "Кнопки с командами доступны внизу чата.",
     ]
     if lines:
         text_lines.append("")
@@ -368,7 +433,27 @@ async def cmd_start(message: Message) -> None:
         if len(channels) > 10:
             text_lines.append(f"... and {len(channels) - 10} more")
 
-    await message.answer("\n".join(text_lines))
+    await message.answer("\n".join(text_lines), reply_markup=_main_menu_keyboard())
+
+
+@router.message(Command("help"))
+@router.message(Command("menu"))
+async def cmd_menu(message: Message) -> None:
+    if not await _ensure_allowed(message, allow_bootstrap=True):
+        return
+
+    await message.answer(
+        "Клавиатура команд включена. Для /add, /remove и /channel укажите аргументы в той же строке.",
+        reply_markup=_main_menu_keyboard(),
+    )
+
+
+@router.message(Command("hide"))
+async def cmd_hide(message: Message) -> None:
+    if not await _ensure_allowed(message, allow_bootstrap=True):
+        return
+
+    await message.answer("Клавиатура скрыта. Вернуть: /menu", reply_markup=ReplyKeyboardRemove())
 
 
 @router.message(Command("add"))
@@ -380,34 +465,30 @@ async def cmd_add(
     if not await _ensure_allowed(message):
         return
 
+    user = message.from_user
+
     if not command.args:
-        await message.answer("Usage: /add <ref>")
+        if user:
+            _pending_add_channel_users.add(user.id)
+        await message.answer("Пришлите @username или ссылку на канал (например, @openai).")
         return
 
     ref = command.args.strip()
-    try:
-        entity = await tg_client.ensure_join(ref)
-        info = tg_client._entity_info(entity)
-        channel = upsert_channel(
-            tg_peer_id=info["tg_peer_id"],
-            username=info["username"],
-            title=info["title"],
-            is_active=True,
-        )
-    except OperationalError as exc:
-        logger.warning("Add failed: {}", exc)
-        await message.answer(
-            "Error: database is unavailable. Start PostgreSQL "
-            "(`docker compose up -d postgres`) and retry."
-        )
+    if user:
+        _pending_add_channel_users.discard(user.id)
+    await _add_channel_by_ref(message, tg_client, ref)
+
+
+@router.message(F.text == "➕ Add channel")
+async def cmd_add_button(message: Message) -> None:
+    if not await _ensure_allowed(message):
         return
-    except Exception as exc:
-        logger.warning("Add failed: {}", exc)
-        await message.answer(f"Error: {exc}")
+    user = message.from_user
+    if not user:
         return
 
-    username = f"@{channel.username}" if channel.username else "—"
-    await message.answer(f"Added/Updated: {channel.title} ({username}) [{channel.tg_peer_id}]")
+    _pending_add_channel_users.add(user.id)
+    await message.answer("Отправьте @username или ссылку на канал (например, @openai).")
 
 
 @router.message(Command("remove"))
@@ -714,3 +795,24 @@ async def cmd_digest_now(message: Message) -> None:
             _digest_now_task = None
 
     _digest_now_task = asyncio.create_task(_run_pipeline_task())
+
+
+@router.message(F.text)
+async def cmd_pending_add_channel_text(message: Message, tg_client: UserTelegramClient) -> None:
+    user = message.from_user
+    if not user or user.id not in _pending_add_channel_users:
+        return
+    if not await _ensure_allowed(message):
+        _pending_add_channel_users.discard(user.id)
+        return
+
+    raw_text = (message.text or "").strip()
+    if not raw_text:
+        await message.answer("Пришлите @username или ссылку на канал.")
+        return
+    if raw_text.startswith("/"):
+        await message.answer("Ожидаю @username или ссылку. Пример: @openai")
+        return
+
+    _pending_add_channel_users.discard(user.id)
+    await _add_channel_by_ref(message, tg_client, raw_text)
